@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+ * Design System — Plataforma Nacional de Resíduos
+ * Mood: Verde floresta industrial × âmbar mercado, sobre grafite quente.
+ * CSS variables espelham os tokens do tailwind.config.js para uso em estilos
+ * dinâmicos (gradientes, shadcn/ui themes, animações de Leaflet).
+ * ============================================================================= */
+
+@layer base {
+  :root {
+    /* === Cores — Verde Floresta Industrial === */
+    --color-primary-50: 240 247 242;
+    --color-primary-100: 218 238 224;
+    --color-primary-200: 181 221 193;
+    --color-primary-300: 128 196 154;
+    --color-primary-400: 77 168 114;
+    --color-primary-500: 30 140 78;
+    --color-primary-600: 23 122 66;
+    --color-primary-700: 17 99 54;
+    --color-primary-800: 13 77 42;
+    --color-primary-900: 8 46 25;
+
+    /* === Accent — Âmbar Mercado === */
+    --color-accent-400: 245 185 66;
+    --color-accent-500: 224 156 26;
+    --color-accent-600: 192 130 21;
+
+    /* === Neutros — Grafite Quente === */
+    --color-neutral-0: 255 255 255;
+    --color-neutral-50: 247 247 245;
+    --color-neutral-100: 238 237 233;
+    --color-neutral-200: 221 219 212;
+    --color-neutral-300: 197 194 184;
+    --color-neutral-400: 158 155 144;
+    --color-neutral-500: 119 116 106;
+    --color-neutral-600: 92 90 82;
+    --color-neutral-700: 67 63 56;
+    --color-neutral-800: 48 45 39;
+    --color-neutral-900: 30 28 23;
+
+    /* === Semânticas === */
+    --color-success-light: 220 252 231;
+    --color-success: 22 163 74;
+    --color-success-dark: 20 83 45;
+    --color-warning-light: 254 249 195;
+    --color-warning: 202 138 4;
+    --color-warning-dark: 133 77 14;
+    --color-error-light: 254 226 226;
+    --color-error: 220 38 38;
+    --color-error-dark: 153 27 27;
+    --color-info-light: 219 234 254;
+    --color-info: 37 99 235;
+    --color-info-dark: 30 58 138;
+
+    /* === Superfícies === */
+    --color-surface-background: 247 247 245;
+    --color-surface-card: 255 255 255;
+    --color-surface-input: 247 247 245;
+    --color-surface-dark: 48 45 39;
+
+    /* === Transições === */
+    --transition-base: 200ms ease-in-out;
+
+    /* === shadcn/ui mapping (HSL aliases para tema integrado) === */
+    --background: 60 17% 96%;        /* neutral-50 */
+    --foreground: 36 13% 10%;        /* neutral-900 */
+    --card: 0 0% 100%;
+    --card-foreground: 36 13% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 36 13% 10%;
+    --primary: 146 65% 33%;          /* primary-500 #1e8c4e */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 41 81% 49%;         /* accent-500 #e09c1a */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 60 12% 91%;             /* neutral-100 */
+    --muted-foreground: 38 6% 45%;   /* neutral-500 */
+    --accent: 41 81% 49%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 73% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 47 11% 84%;            /* neutral-200 */
+    --input: 47 11% 84%;
+    --ring: 146 65% 33%;
+    --radius: 0.75rem;               /* 12px */
+  }
+
+  * {
+    @apply border-neutral-200;
+  }
+
+  html, body, #root {
+    @apply h-full;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-surface-background text-neutral-900 font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'ss03';
+    overscroll-behavior-y: none;
+  }
+
+  /* Headings editoriais — Inter 700 + letter-spacing tighter (≥ 18px) */
+  h1, h2, h3 {
+    @apply font-sans font-bold tracking-tighter;
+  }
+  h1 { @apply text-3xl; }
+  h2 { @apply text-2xl; }
+  h3 { @apply text-xl; }
+
+  /* Dado estruturado em mono — nunca em prosa */
+  .mono, code, kbd, samp, pre, .text-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    font-feature-settings: 'tnum';
+  }
+
+  /* Vozes humanas — Source Serif 4 italic */
+  .voice, blockquote, .chat-bubble-text, .last-message-preview {
+    @apply font-serif italic;
+  }
+
+  /* Input mínimo 16px evita zoom iOS em focus */
+  input[type='text'],
+  input[type='email'],
+  input[type='tel'],
+  input[type='number'],
+  input[type='password'],
+  input[type='search'],
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Scrollbar discreta */
+  ::-webkit-scrollbar { @apply w-1.5 h-1.5; }
+  ::-webkit-scrollbar-thumb { @apply bg-neutral-300 rounded-full; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+
+  /* Foco visível e acessível */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-surface-background;
+  }
+}
+
+@layer components {
+  /* Shell mobile com safe-area Capacitor */
+  .shell-mobile {
+    @apply min-h-screen flex flex-col;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  /* Container mobile canônico — 390px max + padding lateral 16px */
+  .container-mobile {
+    @apply mx-auto w-full max-w-phone px-screen-x;
+  }
+
+  /* Status badge base — 6 estados (variantes em StatusBadge.tsx) */
+  .status-badge {
+    @apply inline-flex items-center font-sans font-bold uppercase tracking-wider rounded-full;
+    font-size: 10px;
+    line-height: 1;
+    padding: 4px 11px;
+  }
+
+  /* Skeleton shimmer para loading states */
+  .skeleton {
+    @apply bg-gradient-to-r from-neutral-100 via-neutral-200 to-neutral-100 bg-[length:800px_100%] animate-shimmer rounded;
+  }
+}
+
+@layer utilities {
+  /* Tap target garantido em touch */
+  .tap-target {
+    @apply min-h-tap min-w-tap;
+  }
+
+  /* Safe area utilities (atalho às vezes mais legível que classes Tailwind) */
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pl-safe { padding-left: env(safe-area-inset-left); }
+  .pr-safe { padding-right: env(safe-area-inset-right); }
+}

@@ -1,0 +1,246 @@
+version: "3.9"
+
+# =============================================================================
+# Plataforma Nacional de Resíduos (PNR)
+# =============================================================================
+# Stack:
+#   - postgres (PostGIS 3.4)   : banco relacional + geoespacial
+#   - redis    (7-alpine)      : cache, pub/sub WebSocket, broker Celery, JWT blocklist
+#   - backend  (FastAPI)       : API REST + WebSocket
+#   - celery_worker            : tasks assíncronos
+#   - celery_beat              : scheduler (LGPD, alertas, expirações)
+#   - frontend (Vite dev)      : React + Capacitor (Web + Backoffice)
+#   - nginx                    : reverse proxy (/ → frontend, /api /ws → backend, /storage estático)
+#   - prometheus               : métricas (/metrics)
+#   - grafana                  : dashboards
+#   - jaeger                   : tracing OTLP
+# =============================================================================
+
+services:
+
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: pnr_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pnr}
+      POSTGRES_USER: ${POSTGRES_USER:-pnr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pnr}
+    volumes:
+      - pnr_postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pnr} -d ${POSTGRES_DB:-pnr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [pnr_net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: pnr_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - pnr_redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [pnr_net]
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pnr_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pnr}:${POSTGRES_PASSWORD:-pnr}@postgres:5432/${POSTGRES_DB:-pnr}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      JWT_BLOCKLIST_REDIS_URL: redis://redis:6379/3
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+    volumes:
+      - ./backend:/app
+      - pnr_backend_storage:/app/storage
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [pnr_net]
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pnr_celery_worker
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=4
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pnr}:${POSTGRES_PASSWORD:-pnr}@postgres:5432/${POSTGRES_DB:-pnr}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    volumes:
+      - ./backend:/app
+      - pnr_backend_storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.tasks.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks: [pnr_net]
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: pnr_celery_beat
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-pnr}:${POSTGRES_PASSWORD:-pnr}@postgres:5432/${POSTGRES_DB:-pnr}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [pnr_net]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pnr_frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-/api}
+      VITE_WS_URL: ${VITE_WS_URL:-/ws}
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - pnr_frontend_node_modules:/app/node_modules
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5173"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [pnr_net]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: pnr_nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - pnr_backend_storage:/var/www/storage:ro
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [pnr_net]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: pnr_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./nginx/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - pnr_prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [pnr_net]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: pnr_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - pnr_grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [pnr_net]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: pnr_jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"  # UI
+      - "4317:4317"                        # OTLP gRPC
+      - "4318:4318"                        # OTLP HTTP
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:16686 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks: [pnr_net]
+
+volumes:
+  pnr_postgres_data:
+  pnr_redis_data:
+  pnr_backend_storage:
+  pnr_frontend_node_modules:
+  pnr_prometheus_data:
+  pnr_grafana_data:
+
+networks:
+  pnr_net:
+    driver: bridge

@@ -1,0 +1,62 @@
+# =============================================================================
+# Plataforma Nacional de Resíduos — .gitignore
+# =============================================================================
+
+# Segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node / Frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# Capacitor — credenciais nativas NUNCA commitadas
+frontend/ios/App/GoogleService-Info.plist
+frontend/android/app/google-services.json
+frontend/ios/App/Pods/
+frontend/ios/App/build/
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/local.properties
+
+# Storage / uploads de runtime
+backend/storage/documentos/*
+backend/storage/anuncios/*
+backend/storage/avatares/*
+backend/storage/conteudo/*
+!backend/storage/**/.gitkeep
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid

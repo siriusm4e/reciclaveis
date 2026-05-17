@@ -1,0 +1,23 @@
+global:
+  scrape_interval:     15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: pnr-prometheus
+    env:     local
+
+scrape_configs:
+  - job_name: 'pnr-backend'
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          service: backend
+    # X-Metrics-Token exigido pelo backend; configurar METRICS_TOKEN no .env
+    # e referenciar via Authorization header / param conforme implementação.
+    # Em laboratório local pode ficar aberto; em produção use bearer_token_file.
+    # bearer_token_file: /etc/prometheus/metrics_token
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
