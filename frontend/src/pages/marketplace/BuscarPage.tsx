@@ -1,3 +1,4 @@
+import { MapPin, Search } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -6,6 +7,7 @@ import { ConditionSelector } from '@/components/ConditionSelector';
 import { ListingCard } from '@/components/ListingCard';
 import { MapSearch } from '@/components/MapSearch';
 import { TopBar } from '@/components/TopBar';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { EmptyState, ErrorState, SkeletonList } from '@/components/ui/states';
@@ -14,6 +16,7 @@ import { useBuscarAnuncios, useBuscarOfertas } from '@/hooks/useAnuncios';
 import { useCategorias, useSubcategorias, useTiposMaterial } from '@/hooks/useCatalogo';
 import { useGeolocalizacao } from '@/hooks/useGeolocalizacao';
 import type { CondicaoForma, CondicaoLimpeza, CondicaoUmidade } from '@/types/api';
+import { type LatLng } from '@/utils/geo';
 
 // Faixas pré-definidas de volume (em kg)
 const VOLUME_BANDS = [
@@ -26,12 +29,37 @@ const VOLUME_BANDS = [
 
 type ColetaFilter = 'todas' | 'retira' | 'entrega' | 'precisa_frete';
 
+interface NominatimResult {
+  lat: string;
+  lon: string;
+  display_name: string;
+}
+
+async function geocodificarEndereco(
+  query: string,
+): Promise<{ lat: number; lng: number; nome: string } | null> {
+  const q = query.trim();
+  if (q.length < 3) return null;
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&countrycodes=br&limit=1&accept-language=pt-BR`;
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`Geocoding ${res.status}`);
+  const data = (await res.json()) as NominatimResult[];
+  if (!data.length) return null;
+  return {
+    lat: Number.parseFloat(data[0].lat),
+    lng: Number.parseFloat(data[0].lon),
+    nome: data[0].display_name,
+  };
+}
+
 export default function MarketplaceBuscarPage() {
   const [params] = useSearchParams();
-  const initialTipo: 'venda' | 'compra' = params.get('modo') === 'vender' || params.get('tipo') === 'compra' ? 'compra' : 'venda';
+  const initialTipo: 'venda' | 'compra' =
+    params.get('modo') === 'vender' || params.get('tipo') === 'compra' ? 'compra' : 'venda';
 
-  // Tela de busca abre no MAPA por padrão (decisão de produto)
-  const [view, setView] = useState<'mapa' | 'lista'>('mapa');
+  // ?view=lista vem dos botões Comprar/Vender da Home; default = mapa
+  const initialView: 'mapa' | 'lista' = params.get('view') === 'lista' ? 'lista' : 'mapa';
+  const [view, setView] = useState<'mapa' | 'lista'>(initialView);
   const [tipo, setTipo] = useState<'venda' | 'compra'>(initialTipo);
 
   // Cascata de filtros: Categoria → Subcategoria → Tipo
@@ -69,14 +97,25 @@ export default function MarketplaceBuscarPage() {
 
   const { position, obterPosicao } = useGeolocalizacao();
 
+  // === Busca por endereço (Nominatim) — controla centro independente da geo ===
+  const [endereco, setEndereco] = useState('');
+  const [enderecoLabel, setEnderecoLabel] = useState<string | null>(null);
+  const [geocodLoading, setGeocodLoading] = useState(false);
+  const [geocodError, setGeocodError] = useState<string | null>(null);
+  // Centro de busca efetivo. Prioridade:
+  //   1. último endereço geocodificado / "Buscar nesta área"
+  //   2. geolocalização do usuário
+  const [centroSelecionado, setCentroSelecionado] = useState<LatLng | null>(null);
+  const centroEfetivo: LatLng | null = centroSelecionado ?? position ?? null;
+
   const buscaParams = useMemo(
     () => ({
       categoria_id: categoriaId,
       subcategoria_id: subcategoriaId,
       tipo_material_id: tipoMaterialId,
-      lat: position?.lat,
-      lng: position?.lng,
-      raio_km: position ? raio : undefined,
+      lat: centroEfetivo?.lat,
+      lng: centroEfetivo?.lng,
+      raio_km: centroEfetivo ? raio : undefined,
       condicao_limpeza: condLimpeza ?? undefined,
       condicao_umidade: condUmidade ?? undefined,
       condicao_forma: condForma ?? undefined,
@@ -90,7 +129,7 @@ export default function MarketplaceBuscarPage() {
       categoriaId,
       subcategoriaId,
       tipoMaterialId,
-      position,
+      centroEfetivo,
       raio,
       condLimpeza,
       condUmidade,
@@ -119,6 +158,40 @@ export default function MarketplaceBuscarPage() {
   // Helper para exibir nome do tipo de material (lookup pelo cache local)
   const nomeDoTipo = (id?: string) => tipos?.find((t) => t.id === id)?.nome ?? null;
 
+  const onBuscarEndereco = async () => {
+    if (!endereco.trim()) return;
+    setGeocodLoading(true);
+    setGeocodError(null);
+    try {
+      const result = await geocodificarEndereco(endereco);
+      if (!result) {
+        setGeocodError('Endereço não encontrado');
+        setEnderecoLabel(null);
+        return;
+      }
+      setCentroSelecionado({ lat: result.lat, lng: result.lng });
+      setEnderecoLabel(result.nome);
+    } catch {
+      setGeocodError('Falha ao buscar endereço. Verifique sua conexão.');
+    } finally {
+      setGeocodLoading(false);
+    }
+  };
+
+  const onUsarMinhaLocalizacao = async () => {
+    const pos = await obterPosicao();
+    setCentroSelecionado(null); // limpa override de endereço — efetivo volta a ser `position`
+    setEnderecoLabel(null);
+    setGeocodError(null);
+    // pos já caiu em `position` via useGeolocalizacao; centroEfetivo recalcula
+    void pos;
+  };
+
+  const onSearchInArea = (c: LatLng) => {
+    setCentroSelecionado(c);
+    setEnderecoLabel(null);
+  };
+
   return (
     <AppLayout>
       <TopBar title="Buscar" />
@@ -130,6 +203,53 @@ export default function MarketplaceBuscarPage() {
             <TabsTrigger value="compra" className="flex-1">Compradores</TabsTrigger>
           </TabsList>
         </Tabs>
+
+        {/* === Busca por endereço (Nominatim) — só faz sentido no modo mapa === */}
+        {view === 'mapa' && (
+          <div>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+                <Input
+                  value={endereco}
+                  onChange={(e) => setEndereco(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      void onBuscarEndereco();
+                    }
+                  }}
+                  placeholder="Digite endereço ou cidade..."
+                  className="pl-9"
+                  aria-label="Buscar endereço ou cidade"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void onBuscarEndereco()}
+                disabled={geocodLoading || !endereco.trim()}
+                className="inline-flex min-h-[44px] min-w-[80px] items-center justify-center gap-1 rounded-md bg-primary-500 px-3 text-sm font-semibold text-neutral-0 shadow-sm disabled:opacity-50"
+              >
+                <Search className="h-4 w-4" />
+                {geocodLoading ? '...' : 'Buscar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void onUsarMinhaLocalizacao()}
+                className="inline-flex min-h-[44px] items-center justify-center gap-1 rounded-md border border-neutral-200 bg-surface-card px-3 text-sm font-medium text-neutral-700"
+                aria-label="Usar minha localização"
+              >
+                <MapPin className="h-4 w-4" />
+              </button>
+            </div>
+            {enderecoLabel && (
+              <p className="mt-1 text-xs text-neutral-600 truncate">{enderecoLabel}</p>
+            )}
+            {geocodError && (
+              <p className="mt-1 text-xs font-medium text-[#dc2626]">{geocodError}</p>
+            )}
+          </div>
+        )}
 
         {/* === Dropdowns encadeados Categoria → Subcategoria → Tipo === */}
         <div className="grid grid-cols-3 gap-2">
@@ -196,7 +316,7 @@ export default function MarketplaceBuscarPage() {
                 <span>1 km</span>
                 <span>500 km</span>
               </div>
-              {!position && (
+              {!position && !centroSelecionado && (
                 <button
                   type="button"
                   onClick={() => void obterPosicao()}
@@ -243,7 +363,7 @@ export default function MarketplaceBuscarPage() {
           </div>
         </details>
 
-        {/* === Toggle Mapa / Lista (Mapa default) === */}
+        {/* === Toggle Mapa / Lista (default vem da URL ?view=) === */}
         <Tabs value={view} onValueChange={(v) => setView(v as 'mapa' | 'lista')}>
           <TabsList>
             <TabsTrigger value="mapa">Mapa</TabsTrigger>
@@ -252,8 +372,11 @@ export default function MarketplaceBuscarPage() {
 
           <TabsContent value="mapa">
             <MapSearch
+              center={centroEfetivo ?? undefined}
               userPosition={position ?? undefined}
-              raioKm={position ? raio : null}
+              raioKm={centroEfetivo ? raio : null}
+              autoFit={false}
+              onSearchInArea={onSearchInArea}
               markers={(items as any[]).map((it) => ({
                 id: it.id,
                 lat: tipo === 'venda' ? it.lat_pub : it.lat,

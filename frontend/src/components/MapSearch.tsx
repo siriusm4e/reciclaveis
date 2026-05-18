@@ -9,11 +9,27 @@
  * Cada pin abre um Popup contextual ao clicar — ver MapPinPopup.
  * Quando `userPosition` é fornecido, o mapa abre centrado nele e desenha um
  * círculo do raio configurado para deixar visualmente claro o filtro aplicado.
+ *
+ * Modo "live map":
+ *   - `autoFit={false}` desliga o re-fit automático quando markers mudam (impede
+ *     que a busca de re-fetch arraste a câmera do usuário).
+ *   - `onSearchInArea` recebe o centro atual ao clicar no botão flutuante
+ *     "Buscar nesta área" — botão aparece somente quando o mapa foi panned
+ *     além do limiar (~0.001° ≈ ~100m) e some após o callback.
  */
 
 import L from 'leaflet';
-import { useEffect, useMemo } from 'react';
-import { Circle, MapContainer, Marker, Popup, TileLayer, useMap } from 'react-leaflet';
+import { Search } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Circle,
+  MapContainer,
+  Marker,
+  Popup,
+  TileLayer,
+  useMap,
+  useMapEvents,
+} from 'react-leaflet';
 
 import 'leaflet/dist/leaflet.css';
 
@@ -50,6 +66,8 @@ const USER_ICON = L.divIcon({
   iconAnchor: [12, 12],
 });
 
+const PAN_THRESHOLD_DEG = 0.001; // ~110m em latitude, suficiente para evitar ruído
+
 export interface MapMarker {
   id: string;
   lat: number;
@@ -72,22 +90,82 @@ interface Props {
   raioKm?: number | null;
   height?: number | string;
   zoom?: number;
+  /**
+   * Reajustar bounds quando markers/userPosition mudam.
+   * - true  (default, retrocompat): re-fitta a câmera a cada change.
+   * - false (live map): fita só na primeira renderização válida e respeita pan do usuário.
+   */
+  autoFit?: boolean;
+  /**
+   * Quando definido, exibe botão flutuante "Buscar nesta área" no topo do mapa
+   * sempre que o usuário panar o mapa além do limiar. Ao clicar, dispara o
+   * callback com o centro atual e oculta o botão até o próximo pan.
+   */
+  onSearchInArea?: (center: LatLng) => void;
+  /** Texto do botão flutuante (default "Buscar nesta área"). */
+  searchInAreaLabel?: string;
 }
 
-function Fit({ markers, userPosition }: { markers: MapMarker[]; userPosition?: LatLng | null }) {
+/** Recentra programaticamente — usado quando autoFit=true OU na primeira montagem. */
+function Fit({
+  markers,
+  userPosition,
+  enabled,
+  onPositioned,
+}: {
+  markers: MapMarker[];
+  userPosition?: LatLng | null;
+  enabled: boolean;
+  onPositioned?: (center: LatLng) => void;
+}) {
   const map = useMap();
   useEffect(() => {
+    if (!enabled) return;
     if (markers.length) {
       const pts: [number, number][] = markers.map((m) => [m.lat, m.lng]);
       if (userPosition) pts.push([userPosition.lat, userPosition.lng]);
       const bounds = L.latLngBounds(pts);
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+      const c = map.getCenter();
+      onPositioned?.({ lat: c.lat, lng: c.lng });
       return;
     }
     if (userPosition) {
       map.setView([userPosition.lat, userPosition.lng], 12, { animate: true });
+      onPositioned?.(userPosition);
     }
-  }, [map, markers, userPosition]);
+  }, [map, markers, userPosition, enabled, onPositioned]);
+  return null;
+}
+
+/** Re-centra UMA vez quando userPosition aparece pela primeira vez (modo live). */
+function CenterOnceOnUser({
+  userPosition,
+  onPositioned,
+}: {
+  userPosition?: LatLng | null;
+  onPositioned?: (center: LatLng) => void;
+}) {
+  const map = useMap();
+  const doneRef = useRef(false);
+  useEffect(() => {
+    if (doneRef.current) return;
+    if (!userPosition) return;
+    map.setView([userPosition.lat, userPosition.lng], 13, { animate: false });
+    doneRef.current = true;
+    onPositioned?.(userPosition);
+  }, [map, userPosition, onPositioned]);
+  return null;
+}
+
+/** Detecta pan do usuário e dispara `onPan` com o novo centro. */
+function MoveListener({ onPan }: { onPan: (c: LatLng) => void }) {
+  useMapEvents({
+    moveend: (e) => {
+      const c = e.target.getCenter();
+      onPan({ lat: c.lat, lng: c.lng });
+    },
+  });
   return null;
 }
 
@@ -98,11 +176,41 @@ export function MapSearch({
   raioKm = null,
   height = '60vh',
   zoom = 12,
+  autoFit = true,
+  onSearchInArea,
+  searchInAreaLabel = 'Buscar nesta área',
 }: Props) {
   const c = useMemo(
     () => userPosition ?? center ?? markers[0] ?? BRASIL_CENTRO,
     [userPosition, center, markers],
   );
+
+  // Centro "âncora" — última posição comprometida (busca rodada). Usado pra
+  // decidir quando exibir o botão "Buscar nesta área".
+  const [anchor, setAnchor] = useState<LatLng>(c);
+  const [currentCenter, setCurrentCenter] = useState<LatLng>(c);
+
+  // Sempre que o consumidor fornece um novo userPosition (ou centro inicial muda),
+  // re-ancora — evita que o botão fique pendurado depois de uma busca externa.
+  useEffect(() => {
+    setAnchor(c);
+    setCurrentCenter(c);
+  }, [c.lat, c.lng]);
+
+  const handlePan = (next: LatLng) => {
+    setCurrentCenter(next);
+  };
+
+  const handlePositioned = (next: LatLng) => {
+    setAnchor(next);
+    setCurrentCenter(next);
+  };
+
+  const panned =
+    Math.abs(currentCenter.lat - anchor.lat) > PAN_THRESHOLD_DEG ||
+    Math.abs(currentCenter.lng - anchor.lng) > PAN_THRESHOLD_DEG;
+
+  const shouldShowSearchInArea = Boolean(onSearchInArea) && panned;
 
   return (
     <div className="relative">
@@ -164,11 +272,38 @@ export function MapSearch({
             );
           })}
 
-          <Fit markers={markers} userPosition={userPosition} />
+          {autoFit ? (
+            <Fit
+              markers={markers}
+              userPosition={userPosition}
+              enabled
+              onPositioned={handlePositioned}
+            />
+          ) : (
+            <CenterOnceOnUser userPosition={userPosition} onPositioned={handlePositioned} />
+          )}
+
+          <MoveListener onPan={handlePan} />
         </MapContainer>
       </div>
 
-      {markers.length === 0 && userPosition && (
+      {/* Botão flutuante "Buscar nesta área" — só renderiza no modo live map */}
+      {shouldShowSearchInArea && (
+        <button
+          type="button"
+          onClick={() => {
+            onSearchInArea?.(currentCenter);
+            setAnchor(currentCenter);
+          }}
+          className="absolute left-1/2 top-3 z-[450] -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-neutral-200 bg-surface-card px-4 py-2 text-sm font-semibold text-neutral-900 shadow-md transition-shadow duration-base hover:shadow-lg"
+          aria-label={searchInAreaLabel}
+        >
+          <Search className="h-4 w-4" />
+          <span>{searchInAreaLabel}</span>
+        </button>
+      )}
+
+      {markers.length === 0 && userPosition && !shouldShowSearchInArea && (
         <div className="absolute left-1/2 top-3 z-[400] -translate-x-1/2 rounded-full bg-surface-card/95 px-3 py-1.5 text-xs font-semibold text-neutral-700 shadow-sm border border-neutral-200">
           Sem resultados no raio aplicado.
           {raioKm && <span className="ml-1 font-mono text-neutral-500">({raioKm}km)</span>}
