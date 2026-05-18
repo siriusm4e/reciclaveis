@@ -187,3 +187,27 @@
   .pl-safe { padding-left: env(safe-area-inset-left); }
   .pr-safe { padding-right: env(safe-area-inset-right); }
 }
+
+/* =============================================================================
+ * Leaflet — overrides para harmonizar com o Design System.
+ * Garante que o Popup tenha cantos arredondados e use a tipografia Inter.
+ * ============================================================================= */
+.leaflet-container {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 14px;
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.10), 0 4px 6px -4px rgb(0 0 0 / 0.10);
+  border: 1px solid rgb(238 237 233);
+  padding: 0;
+}
+.leaflet-popup-content {
+  margin: 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: rgb(48 45 39);
+}
+.leaflet-popup-tip {
+  background: #ffffff;
+  border: 1px solid rgb(238 237 233);
+}

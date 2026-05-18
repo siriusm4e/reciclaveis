@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_conta_ativa, get_current_user, require_papel_interno
@@ -14,6 +14,7 @@ from app.core.exceptions import ForbiddenError, NotFoundError
 from app.db.session import get_db
 from app.models.anuncio_venda import AnuncioVenda
 from app.models.conta import Conta
+from app.models.enums import CondicaoForma, CondicaoLimpeza, CondicaoUmidade
 from app.repositories.marketplace import AnuncioVendaRepository
 from app.schemas.marketplace import (
     AnuncioVendaCreate,
@@ -36,14 +37,17 @@ async def criar(
     conta: Annotated[Conta, Depends(get_conta_ativa)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AnuncioVenda:
+    if payload.fotos and len(payload.fotos) > 3:
+        raise HTTPException(status_code=422, detail="Máximo de 3 fotos por anúncio")
     svc = MarketplaceService(db)
     anuncio = await svc.criar_anuncio_venda(
         conta_id=conta.id,
         papel_id=payload.papel_id,
-        subcategoria_id=payload.subcategoria_id,
-        titulo=payload.titulo,
-        descricao=payload.descricao,
+        tipo_material_id=payload.tipo_material_id,
         atributos=payload.atributos,
+        condicao_limpeza=payload.condicao_limpeza,
+        condicao_umidade=payload.condicao_umidade,
+        condicao_forma=payload.condicao_forma,
         lat_real=payload.localizacao_real.lat,
         lng_real=payload.localizacao_real.lng,
         territorio=payload.territorio,
@@ -66,22 +70,36 @@ async def buscar(
     db: Annotated[AsyncSession, Depends(get_db)],
     categoria_id: UUID | None = Query(default=None),
     subcategoria_id: UUID | None = Query(default=None),
+    tipo_material_id: UUID | None = Query(default=None),
     lat: float | None = Query(default=None, ge=-90, le=90),
     lng: float | None = Query(default=None, ge=-180, le=180),
-    raio_km: int | None = Query(default=None, ge=1, le=500),
+    raio_km: int | None = Query(default=None, ge=1, le=500, description="Entre 1 e 500 km"),
     preco_min: Decimal | None = Query(default=None),
     preco_max: Decimal | None = Query(default=None),
+    volume_minimo_kg: float | None = Query(
+        default=None,
+        ge=0,
+        description="Filtro mútuo: oculta vendedores com volume_estimado abaixo deste número.",
+    ),
+    condicao_limpeza: CondicaoLimpeza | None = Query(default=None),
+    condicao_umidade: CondicaoUmidade | None = Query(default=None),
+    condicao_forma: CondicaoForma | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ):
     return await AnuncioVendaRepository(db).buscar(
         categoria_id=categoria_id,
         subcategoria_id=subcategoria_id,
+        tipo_material_id=tipo_material_id,
         lat=lat,
         lng=lng,
         raio_km=raio_km,
         preco_min=preco_min,
         preco_max=preco_max,
+        volume_minimo_kg=volume_minimo_kg,
+        condicao_limpeza=condicao_limpeza,
+        condicao_umidade=condicao_umidade,
+        condicao_forma=condicao_forma,
         limit=page_size,
         offset=(page - 1) * page_size,
     )
@@ -99,6 +117,9 @@ async def detalhe(
     try:
         anuncio.visualizacoes += 1
         await db.commit()
+        # Recarrega para que `updated_at` (atualizado pelo onupdate=func.now())
+        # esteja disponível durante a serialização sem lazy load async.
+        await db.refresh(anuncio)
     except Exception:
         await db.rollback()
     return anuncio
@@ -111,6 +132,8 @@ async def atualizar(
     conta: Annotated[Conta, Depends(get_conta_ativa)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
+    if payload.fotos is not None and len(payload.fotos) > 3:
+        raise HTTPException(status_code=422, detail="Máximo de 3 fotos por anúncio")
     repo = AnuncioVendaRepository(db)
     anuncio = await repo.get(anuncio_id)
     if anuncio is None:

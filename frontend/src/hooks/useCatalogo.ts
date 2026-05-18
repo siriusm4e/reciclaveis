@@ -20,11 +20,29 @@ export function useSubcategorias(categoriaId: ID | null) {
   });
 }
 
-export function useAtributos(subcategoriaId: ID | null) {
+export function useTiposMaterial(subcategoriaId: ID | null) {
   return useQuery({
-    queryKey: ['subcategorias', subcategoriaId, 'atributos'],
-    queryFn: () => catalogoApi.getAtributos(subcategoriaId as ID),
+    queryKey: ['subcategorias', subcategoriaId, 'tipos'],
+    queryFn: () => catalogoApi.listarTiposMaterial(subcategoriaId as ID),
     enabled: Boolean(subcategoriaId),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useTipoMaterial(tipoId: ID | null) {
+  return useQuery({
+    queryKey: ['tipos', tipoId],
+    queryFn: () => catalogoApi.getTipoMaterial(tipoId as ID),
+    enabled: Boolean(tipoId),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useAtributos(tipoId: ID | null) {
+  return useQuery({
+    queryKey: ['tipos', tipoId, 'atributos'],
+    queryFn: () => catalogoApi.getAtributos(tipoId as ID),
+    enabled: Boolean(tipoId),
     staleTime: 5 * 60_000,
   });
 }

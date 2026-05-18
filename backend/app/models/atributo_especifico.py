@@ -1,8 +1,8 @@
-"""AtributoComum — catálogo dos atributos compartilhados entre todas Subcategorias.
+"""AtributoComum — catálogo dos atributos compartilhados entre todos TiposMaterial.
 
 São fixos do schema (peso, unidade_venda, estado, limpeza, forma_apresentacao,
-origem, frequência). Os AtributosEspecíficos por Subcategoria vivem no JSONB
-de `Subcategoria.atributos_especificos`.
+origem, frequência). Os AtributosEspecíficos por TipoMaterial vivem no JSONB
+de `TipoMaterial.atributos_especificos`.
 
 Esta tabela serve como dicionário de referência editável pelo admin (rótulos,
 ajuda contextual), sem alterar o schema do banco.

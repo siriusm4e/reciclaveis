@@ -126,7 +126,7 @@ export default function CatalogoAdmin() {
                 {subs?.map((s) => (
                   <Card key={s.id} className="p-3">
                     <p className="font-bold">{s.nome}</p>
-                    <p className="text-xs font-mono">{s.slug} · unidade {s.unidade_padrao}</p>
+                    <p className="text-xs font-mono">{s.slug}</p>
                     {s.requer_validacao_documental && (
                       <p className="mt-1 text-xs text-warning-dark">Regulada — exige: {s.documentos_exigidos.join(', ')}</p>
                     )}

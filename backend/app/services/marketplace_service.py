@@ -1,15 +1,15 @@
 """Marketplace — criação de AnuncioVenda e OfertaCompra com regras de validação,
-offset de localização, limite de Plano, Subcategoria Regulada.
+offset de localização, limite de Plano, regulação documental (Subcategoria Regulada).
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
-from typing import Sequence
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import (
     DocumentoFaltandoError,
@@ -21,13 +21,16 @@ from app.core.exceptions import (
 from app.models.anuncio_venda import AnuncioVenda
 from app.models.enums import (
     AnuncioVendaStatus,
+    CondicaoForma,
+    CondicaoLimpeza,
+    CondicaoUmidade,
     FrequenciaAnuncio,
     OfertaCompraStatus,
-    PapelTipo,
 )
 from app.models.oferta_compra import OfertaCompra
+from app.models.tipo_material import TipoMaterial
 from app.repositories.assinatura import AssinaturaRepository, PlanoRepository
-from app.repositories.catalogo import SubcategoriaRepository
+from app.repositories.catalogo import TipoMaterialRepository
 from app.repositories.marketplace import (
     AnuncioVendaRepository,
     OfertaCompraRepository,
@@ -42,11 +45,20 @@ class MarketplaceService:
         self.db = db
         self.anuncios = AnuncioVendaRepository(db)
         self.ofertas = OfertaCompraRepository(db)
-        self.subcategorias = SubcategoriaRepository(db)
+        self.tipos_material = TipoMaterialRepository(db)
         self.papeis = PapelRepository(db)
         self.assinaturas = AssinaturaRepository(db)
         self.planos = PlanoRepository(db)
         self.documentos = DocumentoService(db)
+
+    async def _carregar_tipo_com_subcategoria(self, tipo_material_id: UUID) -> TipoMaterial | None:
+        from sqlalchemy import select
+
+        return await self.db.scalar(
+            select(TipoMaterial)
+            .options(selectinload(TipoMaterial.subcategoria))
+            .where(TipoMaterial.id == tipo_material_id)
+        )
 
     # === AnuncioVenda ===
 
@@ -55,10 +67,11 @@ class MarketplaceService:
         *,
         conta_id: UUID,
         papel_id: UUID,
-        subcategoria_id: UUID,
-        titulo: str,
-        descricao: str | None,
+        tipo_material_id: UUID,
         atributos: dict,
+        condicao_limpeza: CondicaoLimpeza | None,
+        condicao_umidade: CondicaoUmidade | None,
+        condicao_forma: CondicaoForma | None,
         lat_real: float,
         lng_real: float,
         territorio: str,
@@ -71,15 +84,18 @@ class MarketplaceService:
         fotos: list[str],
         aceita_alerta_pago_de_terceiros: bool = True,
     ) -> AnuncioVenda:
-        sub = await self.subcategorias.get(subcategoria_id)
+        tipo = await self._carregar_tipo_com_subcategoria(tipo_material_id)
+        if tipo is None or not tipo.ativo:
+            raise NotFoundError("Tipo de Material não encontrado ou inativo")
+        sub = tipo.subcategoria
         if sub is None or not sub.ativo:
-            raise NotFoundError("Subcategoria não encontrada ou inativa")
+            raise NotFoundError("Subcategoria do material inativa")
 
         papel = await self.papeis.get(papel_id)
         if papel is None or papel.conta_id != conta_id:
             raise ForbiddenError("Papel não pertence à Conta ativa")
 
-        # Subcategoria Regulada → exige Documento aprovado
+        # Regulação documental vive na Subcategoria intermediária
         if sub.requer_validacao_documental:
             faltando = await self.documentos.documentos_faltantes_para_subcategoria(
                 conta_id, sub.documentos_exigidos
@@ -90,14 +106,14 @@ class MarketplaceService:
                     details={"documentos_faltantes": faltando},
                 )
 
-        # Frequência recorrente exige intervalo_geracao
         if frequencia == FrequenciaAnuncio.RECORRENTE and not intervalo_geracao:
             raise ValidationDomainError("Intervalo de geração obrigatório para recorrente")
 
-        # Limite do Plano (publicações ativas)
+        if fotos and len(fotos) > 3:
+            raise ValidationDomainError("Máximo de 3 fotos por anúncio")
+
         await self._validar_limite_plano(conta_id=conta_id, papel_id=papel_id)
 
-        # Offset de privacidade (calculado UMA VEZ aqui)
         lat_pub, lng_pub, offset_m = aplicar_offset_privacidade(
             lat_real, lng_real, territorio=territorio  # type: ignore[arg-type]
         )
@@ -105,10 +121,11 @@ class MarketplaceService:
         anuncio = AnuncioVenda(
             conta_id=conta_id,
             papel_id=papel_id,
-            subcategoria_id=subcategoria_id,
-            titulo=titulo,
-            descricao=descricao,
+            tipo_material_id=tipo_material_id,
             atributos=atributos,
+            condicao_limpeza=condicao_limpeza,
+            condicao_umidade=condicao_umidade,
+            condicao_forma=condicao_forma,
             lat_real=lat_real,
             lng_real=lng_real,
             lat_pub=lat_pub,
@@ -138,14 +155,14 @@ class MarketplaceService:
         return anuncio
 
     async def replicar_anuncio(self, anuncio: AnuncioVenda) -> AnuncioVenda:
-        """Cria uma cópia em rascunho — mantém atributos, recalcula offset ao publicar."""
         novo = AnuncioVenda(
             conta_id=anuncio.conta_id,
             papel_id=anuncio.papel_id,
-            subcategoria_id=anuncio.subcategoria_id,
-            titulo=f"{anuncio.titulo} (cópia)",
-            descricao=anuncio.descricao,
+            tipo_material_id=anuncio.tipo_material_id,
             atributos=dict(anuncio.atributos or {}),
+            condicao_limpeza=anuncio.condicao_limpeza,
+            condicao_umidade=anuncio.condicao_umidade,
+            condicao_forma=anuncio.condicao_forma,
             lat_real=anuncio.lat_real,
             lng_real=anuncio.lng_real,
             lat_pub=anuncio.lat_pub,
@@ -178,7 +195,7 @@ class MarketplaceService:
         *,
         conta_id: UUID,
         papel_id: UUID,
-        subcategoria_id: UUID,
+        tipo_material_id: UUID,
         titulo: str,
         descricao: str | None,
         especificacao: dict,
@@ -186,27 +203,30 @@ class MarketplaceService:
         unidade: str,
         volume_min: Decimal,
         volume_max: Decimal | None,
+        volume_minimo_kg: float | None,
+        condicao_limpeza: CondicaoLimpeza | None,
+        condicao_umidade: CondicaoUmidade | None,
+        condicao_forma: CondicaoForma | None,
         lat: float,
         lng: float,
         raio_km: int,
         retira: bool,
         prazo_validade: datetime,
     ) -> OfertaCompra:
-        sub = await self.subcategorias.get(subcategoria_id)
-        if sub is None or not sub.ativo:
-            raise NotFoundError("Subcategoria não encontrada ou inativa")
+        tipo = await self.tipos_material.get(tipo_material_id)
+        if tipo is None or not tipo.ativo:
+            raise NotFoundError("Tipo de Material não encontrado ou inativo")
 
         papel = await self.papeis.get(papel_id)
         if papel is None or papel.conta_id != conta_id:
             raise ForbiddenError("Papel não pertence à Conta ativa")
 
-        # Limite do Plano
         await self._validar_limite_plano(conta_id=conta_id, papel_id=papel_id, oferta=True)
 
         oferta = OfertaCompra(
             conta_id=conta_id,
             papel_id=papel_id,
-            subcategoria_id=subcategoria_id,
+            tipo_material_id=tipo_material_id,
             titulo=titulo,
             descricao=descricao,
             especificacao=especificacao,
@@ -214,6 +234,10 @@ class MarketplaceService:
             unidade=unidade,
             volume_min=volume_min,
             volume_max=volume_max,
+            volume_minimo_kg=volume_minimo_kg,
+            condicao_limpeza=condicao_limpeza,
+            condicao_umidade=condicao_umidade,
+            condicao_forma=condicao_forma,
             lat=lat,
             lng=lng,
             raio_km=raio_km,
@@ -232,7 +256,6 @@ class MarketplaceService:
         self, *, conta_id: UUID, papel_id: UUID, oferta: bool = False
     ) -> None:
         assinatura = await self.assinaturas.get_do_papel(papel_id)
-        # Sem assinatura: usa plano gratuito do Papel (se existir)
         papel = await self.papeis.get(papel_id)
         if papel is None:
             raise ForbiddenError("Papel inexistente")
@@ -243,10 +266,9 @@ class MarketplaceService:
             plano = await self.planos.get(assinatura.plano_id)
 
         if plano is None:
-            return  # sem limite definido — política aberta
+            return
 
-        # Conta ativas (anuncios + ofertas combinadas)
-        from sqlalchemy import func, or_, select
+        from sqlalchemy import func, select
 
         ativos_anuncios = int(
             await self.db.scalar(
@@ -273,7 +295,6 @@ class MarketplaceService:
             or 0
         )
         total = ativos_anuncios + ativos_ofertas + (1 if not oferta else 0)
-        # +1 porque vamos publicar mais uma agora (anúncio)
         if total > plano.limite_publicacoes_ativas:
             raise LimitePublicacoesAtingidoError(
                 "Limite de publicações ativas do Plano atingido",
@@ -283,8 +304,6 @@ class MarketplaceService:
                     "ativos": total,
                 },
             )
-
-    # === Liberar localização exata (acessível por route de Negociação) ===
 
     @staticmethod
     def pode_ver_localizacao_exata(anuncio: AnuncioVenda, *, aceite_bilateral: bool, status_negociacao: str) -> bool:

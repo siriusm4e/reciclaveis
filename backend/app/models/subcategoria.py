@@ -1,7 +1,14 @@
-"""Subcategoria — refinamento da Categoria, com schema JSONB de atributos específicos.
+"""Subcategoria — nível intermediário da taxonomia.
 
-Subcategoria Regulada (`requer_validacao_documental=True`) bloqueia publicação
-sem Documento aprovado do Tipo correspondente para o Papel do publicador.
+Hierarquia:
+    Categoria (ex: Plásticos)
+      → Subcategoria (ex: PET)            ← este model
+          → TipoMaterial (ex: PET cristal)
+
+Regulação documental (Hospitalar, Químicos) vive aqui — todos os TiposMaterial
+dependentes herdam a exigência via `requer_validacao_documental` da Subcategoria.
+
+Atributos específicos (cor, granulometria, etc.) ficam em TipoMaterial.
 """
 
 from __future__ import annotations
@@ -17,6 +24,7 @@ from app.db.base import Base, TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
     from app.models.categoria import Categoria
+    from app.models.tipo_material import TipoMaterial
 
 
 class Subcategoria(Base, UUIDPKMixin, TimestampMixin):
@@ -27,20 +35,18 @@ class Subcategoria(Base, UUIDPKMixin, TimestampMixin):
     categoria_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("categoria.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    nome: Mapped[str] = mapped_column(String(150), nullable=False)
-    slug: Mapped[str] = mapped_column(String(150), nullable=False)
-    unidade_padrao: Mapped[str] = mapped_column(String(20), nullable=False)  # kg, ton, m3, unidade, ...
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), nullable=False)
 
-    # Subcategorias Reguladas exigem documentação específica (ex.: hospitalar, químicos)
+    # Regulação documental — flag e lista de documentos exigidos vivem no
+    # nível intermediário (ex.: toda Hospitalar > Infectantes exige licença).
     requer_validacao_documental: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # Lista de slugs de TipoDocumento exigidos (ex.: ["licenca_ambiental", "cadri"])
     documentos_exigidos: Mapped[list[str]] = mapped_column(JSONB, default=list, nullable=False)
-
-    # Schema JSON dos atributos específicos da Subcategoria.
-    # Estrutura: {"campo": {"type": "string|number|enum|bool", "label": "...", "enum": [...]}}
-    atributos_especificos: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     ordem: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     ativo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
 
     categoria: Mapped["Categoria"] = relationship("Categoria", back_populates="subcategorias")
+    tipos_material: Mapped[list["TipoMaterial"]] = relationship(
+        "TipoMaterial", back_populates="subcategoria", cascade="all, delete-orphan"
+    )

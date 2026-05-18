@@ -1,7 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { documentosApi } from '@/api/endpoints/documentos';
+import { documentosApi, tiposDocApi } from '@/api/endpoints/documentos';
 import type { ID } from '@/types/api';
+
+export function useTiposDocumento(papel?: string) {
+  return useQuery({
+    queryKey: ['tipos-documento', papel ?? null],
+    queryFn: () => tiposDocApi.list(papel),
+    staleTime: 5 * 60_000,
+  });
+}
 
 export function useDocumentos() {
   return useQuery({ queryKey: ['documentos'], queryFn: documentosApi.list });

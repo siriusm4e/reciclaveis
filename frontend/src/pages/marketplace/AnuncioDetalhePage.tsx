@@ -10,18 +10,30 @@ import { Button } from '@/components/ui/button';
 import { CenterSpinner, ErrorState } from '@/components/ui/states';
 import { showToast } from '@/components/ui/toaster';
 import { useAnuncio } from '@/hooks/useAnuncios';
+import { useTipoMaterial } from '@/hooks/useCatalogo';
 import { useAbrirNegociacao } from '@/hooks/useNegociacao';
 import { formatBRL } from '@/utils/currency';
 import { formatDate } from '@/utils/dates';
+
+const CONDICAO_LABELS: Record<string, string> = {
+  limpo: 'Limpo', sujo: 'Sujo', contaminado: 'Contaminado',
+  seco: 'Seco', umido: 'Úmido', molhado: 'Molhado',
+  solto: 'Solto', fardo: 'Fardo', prensado: 'Prensado',
+  moido: 'Moído', triturado: 'Triturado', granulado: 'Granulado',
+};
 
 export default function AnuncioDetalhePage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const { data, isLoading, error, refetch } = useAnuncio(id);
+  const { data: tipo } = useTipoMaterial(data?.tipo_material_id ?? null);
   const abrir = useAbrirNegociacao();
 
   if (isLoading) return <AppLayout><CenterSpinner /></AppLayout>;
   if (error || !data) return <AppLayout><ErrorState onRetry={refetch} /></AppLayout>;
+
+  // Anúncio identificado por Categoria > Subcategoria > Tipo + Condição
+  const tituloDerivado = tipo?.nome ?? 'Anúncio de venda';
 
   const onNegociar = () => {
     abrir.mutate(
@@ -48,7 +60,7 @@ export default function AnuncioDetalhePage() {
 
         <div className="px-screen-x py-4 space-y-4">
           <div className="flex items-start justify-between gap-3">
-            <h1 className="text-2xl font-bold tracking-tighter">{data.titulo}</h1>
+            <h1 className="text-2xl font-bold tracking-tighter">{tituloDerivado}</h1>
             <StatusBadge status={data.status} />
           </div>
 
@@ -60,8 +72,19 @@ export default function AnuncioDetalhePage() {
             </p>
           </div>
 
-          {data.descricao && (
-            <p className="font-serif italic text-base text-neutral-700 leading-relaxed">{data.descricao}</p>
+          {(data.condicao_limpeza || data.condicao_umidade || data.condicao_forma) && (
+            <div className="flex flex-wrap gap-1.5">
+              {[data.condicao_limpeza, data.condicao_umidade, data.condicao_forma]
+                .filter(Boolean)
+                .map((c) => (
+                  <span
+                    key={c}
+                    className="rounded-full border border-primary-200 bg-primary-50 px-2.5 py-0.5 text-xs font-medium text-primary-700"
+                  >
+                    {CONDICAO_LABELS[c as string] ?? c}
+                  </span>
+                ))}
+            </div>
           )}
 
           {/* Atributos */}
@@ -86,7 +109,7 @@ export default function AnuncioDetalhePage() {
             </div>
             <MapSearch
               center={{ lat: data.lat_pub, lng: data.lng_pub }}
-              markers={[{ id: data.id, lat: data.lat_pub, lng: data.lng_pub, tipo: 'venda', titulo: data.titulo }]}
+              markers={[{ id: data.id, lat: data.lat_pub, lng: data.lng_pub, tipo: 'venda', titulo: tituloDerivado }]}
               height={220}
               zoom={14}
             />

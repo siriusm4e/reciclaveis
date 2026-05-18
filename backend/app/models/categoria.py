@@ -1,4 +1,7 @@
-"""Categoria de material reciclável (Metais, Plásticos, Papéis, ...)."""
+"""Categoria de material reciclável (Metais, Plásticos, Papéis, ...).
+
+Topo da taxonomia: Categoria → Subcategoria (intermediário) → TipoMaterial (granular).
+"""
 
 from __future__ import annotations
 

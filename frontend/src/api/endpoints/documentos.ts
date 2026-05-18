@@ -1,5 +1,12 @@
 import { api } from '@/api/client';
-import type { Documento, ID } from '@/types/api';
+import type { Documento, ID, TipoDocumento } from '@/types/api';
+
+export const tiposDocApi = {
+  list: (papel?: string) =>
+    api
+      .get<TipoDocumento[]>('/tipos-documento/', { params: papel ? { papel } : undefined })
+      .then((r) => r.data),
+};
 
 export const documentosApi = {
   list: () => api.get<Documento[]>('/documentos/').then((r) => r.data),

@@ -16,6 +16,7 @@ def register_all_models() -> None:
     # Catálogo + documentos
     from app.models import categoria  # noqa: F401
     from app.models import subcategoria  # noqa: F401
+    from app.models import tipo_material  # noqa: F401
     from app.models import atributo_especifico  # noqa: F401
     from app.models import tipo_documento  # noqa: F401
     from app.models import documento  # noqa: F401

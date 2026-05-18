@@ -44,6 +44,17 @@ export type OfertaCompraStatus =
   | 'concluida';
 
 export type FrequenciaAnuncio = 'lote_unico' | 'recorrente';
+
+// Condição (grupos exclusivos no formulário/filtro)
+export type CondicaoLimpeza = 'limpo' | 'sujo' | 'contaminado';
+export type CondicaoUmidade = 'seco' | 'umido' | 'molhado';
+export type CondicaoForma =
+  | 'solto'
+  | 'fardo'
+  | 'prensado'
+  | 'moido'
+  | 'triturado'
+  | 'granulado';
 export type CondicaoEquipamento = 'novo' | 'seminovo' | 'usado';
 export type ModalidadeMaquina = 'venda' | 'aluguel' | 'ambos';
 export type UnidadeCobrancaServico = 'hora' | 'visita' | 'lote';
@@ -204,14 +215,30 @@ export interface Categoria {
   ativo: boolean;
 }
 
+/**
+ * Subcategoria — nível intermediário (Categoria → Subcategoria → TipoMaterial).
+ * Regulação documental vive aqui; unidade_padrao + atributos vivem em TipoMaterial.
+ */
 export interface Subcategoria {
   id: ID;
   categoria_id: ID;
   nome: string;
   slug: string;
-  unidade_padrao: string;
   requer_validacao_documental: boolean;
   documentos_exigidos: string[];
+  ordem: number;
+  ativo: boolean;
+}
+
+/**
+ * TipoMaterial — nível mais granular (PET cristal, Alumínio latinha, ...).
+ */
+export interface TipoMaterial {
+  id: ID;
+  subcategoria_id: ID;
+  nome: string;
+  slug: string;
+  unidade_padrao: string;
   atributos_especificos: Record<string, unknown>;
   ordem: number;
   ativo: boolean;
@@ -252,10 +279,12 @@ export interface AnuncioVenda {
   id: ID;
   conta_id: ID;
   papel_id: ID;
-  subcategoria_id: ID;
-  titulo: string;
-  descricao: string | null;
+  tipo_material_id: ID;
   atributos: Record<string, unknown>;
+  // Condição (grupos exclusivos)
+  condicao_limpeza: CondicaoLimpeza | null;
+  condicao_umidade: CondicaoUmidade | null;
+  condicao_forma: CondicaoForma | null;
   lat_pub: number;
   lng_pub: number;
   offset_m: number;
@@ -278,7 +307,7 @@ export interface OfertaCompra {
   id: ID;
   conta_id: ID;
   papel_id: ID;
-  subcategoria_id: ID;
+  tipo_material_id: ID;
   titulo: string;
   descricao: string | null;
   especificacao: Record<string, unknown>;
@@ -286,6 +315,11 @@ export interface OfertaCompra {
   unidade: string;
   volume_min: string;
   volume_max: string | null;
+  // Filtro mútuo: vendedor só vê esta oferta se volume_estimado ≥ volume_minimo_kg
+  volume_minimo_kg: number | null;
+  condicao_limpeza: CondicaoLimpeza | null;
+  condicao_umidade: CondicaoUmidade | null;
+  condicao_forma: CondicaoForma | null;
   lat: number;
   lng: number;
   raio_km: number;

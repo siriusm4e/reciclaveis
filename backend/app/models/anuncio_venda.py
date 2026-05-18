@@ -26,18 +26,23 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
-from app.models.enums import AnuncioVendaStatus, FrequenciaAnuncio
+from app.models.enums import (
+    AnuncioVendaStatus,
+    CondicaoForma,
+    CondicaoLimpeza,
+    CondicaoUmidade,
+    FrequenciaAnuncio,
+)
 
 if TYPE_CHECKING:
     from app.models.conta import Conta
     from app.models.papel import PapelAtivado
-    from app.models.subcategoria import Subcategoria
+    from app.models.tipo_material import TipoMaterial
 
 
 class AnuncioVenda(Base, UUIDPKMixin, TimestampMixin):
@@ -54,15 +59,45 @@ class AnuncioVenda(Base, UUIDPKMixin, TimestampMixin):
     papel_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("papel_ativado.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    subcategoria_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("subcategoria.id"), nullable=False, index=True
+    tipo_material_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tipo_material.id"), nullable=False, index=True
     )
 
-    titulo: Mapped[str] = mapped_column(String(150), nullable=False)
-    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Identificação do anúncio = Categoria + Subcategoria + Tipo + Condição.
+    # Sem campos de título/descrição livre (decisão de produto pós-homologação).
 
-    # Atributos comuns + específicos da Subcategoria validados no service
+    # Atributos comuns + específicos do TipoMaterial validados no service
     atributos: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+
+    # === Condição (grupos exclusivos no formulário) ===
+    # values_callable força SQLAlchemy a usar o .value (lowercase) ao serializar
+    # — o tipo Postgres foi criado com labels lowercase em 0003. Sem isso, o
+    # default seria .name (uppercase) e qualquer INSERT falharia com
+    # `invalid input value for enum`.
+    condicao_limpeza: Mapped[CondicaoLimpeza | None] = mapped_column(
+        SAEnum(
+            CondicaoLimpeza,
+            name="condicao_limpeza",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=True,
+    )
+    condicao_umidade: Mapped[CondicaoUmidade | None] = mapped_column(
+        SAEnum(
+            CondicaoUmidade,
+            name="condicao_umidade",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=True,
+    )
+    condicao_forma: Mapped[CondicaoForma | None] = mapped_column(
+        SAEnum(
+            CondicaoForma,
+            name="condicao_forma",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=True,
+    )
 
     # === Privacidade de localização ===
     # Localização REAL — nunca exposta publicamente
@@ -111,4 +146,4 @@ class AnuncioVenda(Base, UUIDPKMixin, TimestampMixin):
 
     conta: Mapped["Conta"] = relationship("Conta")
     papel: Mapped["PapelAtivado"] = relationship("PapelAtivado")
-    subcategoria: Mapped["Subcategoria"] = relationship("Subcategoria")
+    tipo_material: Mapped["TipoMaterial"] = relationship("TipoMaterial")

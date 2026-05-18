@@ -96,6 +96,29 @@ class FrequenciaAnuncio(str, enum.Enum):
     RECORRENTE = "recorrente"
 
 
+# === Condição do material (grupos exclusivos no formulário) ===
+
+class CondicaoLimpeza(str, enum.Enum):
+    LIMPO = "limpo"
+    SUJO = "sujo"
+    CONTAMINADO = "contaminado"
+
+
+class CondicaoUmidade(str, enum.Enum):
+    SECO = "seco"
+    UMIDO = "umido"
+    MOLHADO = "molhado"
+
+
+class CondicaoForma(str, enum.Enum):
+    SOLTO = "solto"
+    FARDO = "fardo"
+    PRENSADO = "prensado"
+    MOIDO = "moido"
+    TRITURADO = "triturado"
+    GRANULADO = "granulado"
+
+
 class CondicaoEquipamento(str, enum.Enum):
     NOVO = "novo"
     SEMINOVO = "seminovo"

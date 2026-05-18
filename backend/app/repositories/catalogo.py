@@ -1,4 +1,4 @@
-"""Repositórios — Categoria, Subcategoria, AtributoComum."""
+"""Repositórios — Categoria, Subcategoria (intermediário), TipoMaterial (granular), AtributoComum."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.models.atributo_especifico import AtributoComum
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria
+from app.models.tipo_material import TipoMaterial
 from app.repositories.base import BaseRepository
 
 
@@ -42,6 +43,29 @@ class SubcategoriaRepository(BaseRepository[Subcategoria]):
         return await self.db.scalar(
             select(Subcategoria).where(
                 Subcategoria.categoria_id == categoria_id, Subcategoria.slug == slug
+            )
+        )
+
+
+class TipoMaterialRepository(BaseRepository[TipoMaterial]):
+    model = TipoMaterial
+
+    async def listar_da_subcategoria(self, subcategoria_id: UUID) -> list[TipoMaterial]:
+        return list(
+            await self.db.scalars(
+                select(TipoMaterial)
+                .where(
+                    TipoMaterial.subcategoria_id == subcategoria_id,
+                    TipoMaterial.ativo.is_(True),
+                )
+                .order_by(TipoMaterial.ordem)
+            )
+        )
+
+    async def get_by_slug(self, subcategoria_id: UUID, slug: str) -> TipoMaterial | None:
+        return await self.db.scalar(
+            select(TipoMaterial).where(
+                TipoMaterial.subcategoria_id == subcategoria_id, TipoMaterial.slug == slug
             )
         )
 

@@ -2,12 +2,21 @@
 
     docker compose exec backend python -m app.scripts.seed
 
-Idempotente: roda múltiplas vezes sem duplicar (faz upsert por slug/nome).
+Idempotente: roda múltiplas vezes sem duplicar (upsert por slug por nível).
+
+Conteúdo seed:
+  - Taxonomia do setor (3 níveis: Categoria → Subcategoria → TipoMaterial)
+  - TiposDocumento padrão
+  - Planos por Papel (gratuito + pago)
+  - Pacotes de Crédito
+  - Superadministrador
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
+import unicodedata
 from typing import Iterable
 
 import structlog
@@ -20,224 +29,414 @@ from app.db.session import SessionLocal
 from app.models.categoria import Categoria
 from app.models.enums import (
     DocumentoEscopo,
-    PerfilInternoTipo,
     PapelTipo,
+    PerfilInternoTipo,
 )
 from app.models.pacote_credito import PacoteCredito
 from app.models.perfil_interno import PerfilInterno
 from app.models.plano import Plano
 from app.models.subcategoria import Subcategoria
 from app.models.tipo_documento import TipoDocumento
+from app.models.tipo_material import TipoMaterial
 from app.models.usuario import Usuario
 
 log = structlog.get_logger(__name__)
 
 
 # =============================================================================
-# Categorias e Subcategorias do catálogo nacional
+# Slugify
 # =============================================================================
 
-CATALOGO: list[dict] = [
+def _slug(text: str) -> str:
+    """Slug ASCII em snake-kebab. 'Papelão ondulado' → 'papelao-ondulado'."""
+    nfkd = unicodedata.normalize("NFKD", text)
+    ascii_only = nfkd.encode("ascii", "ignore").decode("ascii")
+    lowered = ascii_only.lower().strip()
+    # mantém alfanum e troca resto por '-'
+    return re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+
+
+# =============================================================================
+# Taxonomia oficial do setor (validada pelo cliente)
+#
+# Estrutura:
+#   {
+#     "categoria": {nome, cor_hex, icone, ordem},
+#     "subcategorias": [
+#       {nome, regulada?, documentos?, tipos: [(nome, unidade_padrao), ...]},
+#     ]
+#   }
+#
+# Default de unidade_padrao = "kg" quando não especificado.
+# =============================================================================
+
+_DOCS_REGULADO_PADRAO = ["licenca_ambiental", "cadri"]
+_DOCS_REGULADO_QUIMICO = ["licenca_ambiental", "cadri", "mtr"]
+
+
+TAXONOMIA: list[dict] = [
+    # ------------------------------------------------------------------ Papel
     {
-        "nome": "Metais",
-        "slug": "metais",
-        "cor_hex": "#5c5a52",
-        "icone": "wrench",
-        "ordem": 10,
+        "categoria": {"nome": "Papel / Papelão", "cor_hex": "#3b82f6", "icone": "file-text", "ordem": 10},
         "subcategorias": [
-            ("Alumínio (latinha)", "aluminio-latinha", "kg"),
-            ("Alumínio chaparia", "aluminio-chaparia", "kg"),
-            ("Cobre", "cobre", "kg"),
-            ("Aço/Ferro", "aco-ferro", "kg"),
-            ("Sucata mista", "sucata-mista", "kg"),
+            {"nome": "Papelão", "tipos": [
+                "Papelão ondulado", "Papelão prensado",
+            ]},
+            {"nome": "Papel Branco", "tipos": [
+                "Papel branco", "Papel sulfite", "Papel couchê",
+            ]},
+            {"nome": "Papel Misto", "tipos": [
+                "Papel misto", "Aparas de papel", "Papel contaminado",
+            ]},
+            {"nome": "Papel Especial", "tipos": [
+                "Papel arquivo", "Jornal", "Revista", "Lista telefônica", "Papel kraft",
+                "Saco de cimento kraft", "Papel térmico", "Papel plastificado",
+            ]},
+            {"nome": "Embalagem Papel", "tipos": [
+                "Tetra Pak",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Plásticos
     {
-        "nome": "Plásticos",
-        "slug": "plasticos",
-        "cor_hex": "#dc2626",
-        "icone": "box",
-        "ordem": 20,
+        "categoria": {"nome": "Plásticos", "cor_hex": "#dc2626", "icone": "box", "ordem": 20},
         "subcategorias": [
-            ("PET cristal", "pet-cristal", "kg"),
-            ("PET verde", "pet-verde", "kg"),
-            ("PEAD (rígido)", "pead", "kg"),
-            ("PP", "pp", "kg"),
-            ("PVC", "pvc", "kg"),
-            ("Filme PEBD", "filme-pebd", "kg"),
+            {"nome": "PET", "tipos": [
+                "PET branca", "PET verde", "PET azul", "PET óleo", "PET colorida",
+                "PET âmbar", "PET cristal", "PET prensada", "PET moída",
+                "Fita PET verde", "Fita PET azul",
+            ]},
+            {"nome": "PEAD / PEBD / PE", "tipos": [
+                "PEAD branco", "PEAD colorido", "PEAD sopro", "PEAD injeção",
+                "PE branco leitoso", "PE colorido", "PE grosso (bombona)", "PE cristal",
+                "PEBD filme", "Filme cristal", "Filme colorido", "Filme lona preta",
+                "Filme agrícola", "Filme misturado", "Sacola cristal", "Sacola colorida",
+                "Sacola preta", "Sacola mista", "Stretch", "Shrink",
+            ]},
+            {"nome": "PP", "tipos": [
+                "PP mineral", "PP branco", "PP preto", "PP colorido", "PP margarina",
+                "PP para-choque", "PP balde", "PP bacia", "PP tampinha", "PP cadeira",
+                "PP copinho", "PP misto", "PP moído", "PP com carga mineral",
+            ]},
+            {"nome": "PVC", "tipos": [
+                "PVC rígido", "PVC flexível", "PVC prensado", "PVC solto",
+                "PVC mangueira", "PVC tubo", "PVC esquadria", "PVC cabo elétrico",
+            ]},
+            {"nome": "Outros Plásticos", "tipos": [
+                "PS cristal", "PS copinho", "ABS", "Acrílico", "Nylon", "Policarbonato",
+                "EVA", "PU", "Isopor / EPS", "Borracha", "Silicone", "Ráfia", "Big Bag",
+                "Mangueira", "Caixa plástica", "Balde plástico", "Bombona", "Galão plástico",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Metais
     {
-        "nome": "Papéis",
-        "slug": "papeis",
-        "cor_hex": "#3b82f6",
-        "icone": "file-text",
-        "ordem": 30,
+        "categoria": {"nome": "Metais", "cor_hex": "#5c5a52", "icone": "wrench", "ordem": 30},
         "subcategorias": [
-            ("Papelão", "papelao", "kg"),
-            ("Papel branco (off-set)", "papel-branco", "kg"),
-            ("Papel misto", "papel-misto", "kg"),
-            ("Jornal/revista", "jornal-revista", "kg"),
-            ("Tetra Pak (longa vida)", "tetra-pak", "kg"),
+            {"nome": "Ferrosos", "tipos": [
+                "Ferro misto", "Ferro fundido", "Sucata miúda", "Sucata graúda", "Aço",
+                "Cavaco de ferro", "Chaparia", "Perfil metálico", "Estrutura metálica",
+                "Lata de aço", "Tambor metálico", "Trilho", "Vergalhão",
+            ]},
+            {"nome": "Não Ferrosos", "tipos": [
+                "Alumínio latinha", "Alumínio perfil", "Alumínio bloco", "Alumínio panela",
+                "Alumínio chapa", "Alumínio duro", "Alumínio mole", "Cobre mel",
+                "Cobre misto", "Cobre queimado", "Cobre estanhado", "Latão", "Bronze",
+                "Zamac", "Chumbo", "Zinco", "Níquel", "Estanho", "Inox", "Metal misto",
+                "Fios elétricos",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Vidros
     {
-        "nome": "Vidros",
-        "slug": "vidros",
-        "cor_hex": "#10b981",
-        "icone": "wine",
-        "ordem": 40,
+        "categoria": {"nome": "Vidros", "cor_hex": "#10b981", "icone": "wine", "ordem": 40},
         "subcategorias": [
-            ("Vidro incolor", "vidro-incolor", "kg"),
-            ("Vidro âmbar", "vidro-ambar", "kg"),
-            ("Vidro verde", "vidro-verde", "kg"),
-            ("Vidro plano", "vidro-plano", "kg"),
+            {"nome": "Vidro Comum", "tipos": [
+                "Vidro transparente", "Vidro verde", "Vidro âmbar", "Vidro misto",
+                "Garrafa retornável", "Caco de vidro", "Vidro moído",
+            ]},
+            {"nome": "Vidro Especial", "tipos": [
+                "Vidro temperado", "Vidro laminado", "Para-brisa",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Óleos e Líquidos
     {
-        "nome": "Óleos",
-        "slug": "oleos",
-        "cor_hex": "#f59e0b",
-        "icone": "droplet",
-        "ordem": 50,
+        "categoria": {"nome": "Óleos e Líquidos", "cor_hex": "#f59e0b", "icone": "droplet", "ordem": 50},
         "subcategorias": [
-            ("Óleo de cozinha usado", "oleo-cozinha-usado", "l"),
-            ("Óleo lubrificante usado", "oleo-lubrificante-usado", "l"),
+            {"nome": "Óleos Vegetais", "tipos_unidade": [
+                ("Óleo vegetal usado", "l"),
+            ]},
+            {"nome": "Óleos Minerais e Industriais", "tipos_unidade": [
+                ("Óleo mineral usado", "l"), ("Óleo hidráulico", "l"),
+                ("Óleo lubrificante", "l"), ("Fluido industrial", "l"),
+                ("Diesel contaminado", "l"), ("Querosene", "l"),
+                ("Solvente usado", "l"), ("Tinta residual", "l"),
+                ("Graxa", "kg"), ("Gordura industrial", "kg"),
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Eletrônicos / E-lixo
     {
-        "nome": "Eletrônicos",
-        "slug": "eletronicos",
-        "cor_hex": "#8b5cf6",
-        "icone": "cpu",
-        "ordem": 60,
+        "categoria": {"nome": "Eletrônicos / E-lixo", "cor_hex": "#8b5cf6", "icone": "cpu", "ordem": 60},
         "subcategorias": [
-            ("Placas (PCI)", "placas-pci", "kg"),
-            ("Cabos e fios", "cabos-fios", "kg"),
-            ("Eletrodomésticos (linha branca)", "linha-branca", "unidade"),
-            ("Telefonia/celular", "celular", "unidade"),
+            {"nome": "Equipamentos", "tipos_unidade": [
+                ("Computadores", "unidade"), ("Notebooks", "unidade"),
+                ("Celulares", "unidade"), ("Tablets", "unidade"),
+                ("Monitores", "unidade"), ("TVs", "unidade"),
+                ("Impressoras", "unidade"), ("Nobreaks", "unidade"),
+                ("Equipamentos de rede", "unidade"), ("Eletrodomésticos", "unidade"),
+            ]},
+            {"nome": "Componentes", "tipos": [
+                "Placas eletrônicas", "Fontes", "Cabos", "HDs", "Baterias",
+            ]},
+            {"nome": "Sucata Eletrônica", "tipos": [
+                "Sucata eletrônica mista",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Baterias / Pilhas
     {
-        "nome": "Construção civil",
-        "slug": "construcao-civil",
-        "cor_hex": "#6b7280",
-        "icone": "hammer",
-        "ordem": 70,
+        "categoria": {"nome": "Baterias / Pilhas", "cor_hex": "#facc15", "icone": "battery", "ordem": 70},
         "subcategorias": [
-            ("Entulho misto", "entulho-misto", "m3"),
-            ("Concreto", "concreto", "m3"),
-            ("Madeira de obra", "madeira-obra", "m3"),
-            ("Gesso", "gesso", "kg"),
+            {"nome": "Baterias", "tipos_unidade": [
+                ("Bateria automotiva", "unidade"),
+                ("Bateria estacionária", "unidade"),
+                ("Bateria de celular", "unidade"),
+                ("Nobreak", "unidade"),
+            ]},
+            {"nome": "Pilhas", "tipos": [
+                "Pilhas alcalinas", "Pilhas recarregáveis", "Lítio",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Madeira
     {
-        "nome": "Têxteis",
-        "slug": "texteis",
-        "cor_hex": "#ec4899",
-        "icone": "shirt",
-        "ordem": 80,
+        "categoria": {"nome": "Madeira", "cor_hex": "#a16207", "icone": "tree-pine", "ordem": 80},
         "subcategorias": [
-            ("Algodão (retalho)", "algodao-retalho", "kg"),
-            ("Tecido misto", "tecido-misto", "kg"),
+            {"nome": "Madeira Limpa", "tipos_unidade": [
+                ("Madeira limpa", "m3"), ("Pallets", "unidade"),
+                ("Compensado", "m3"), ("Serragem", "kg"),
+                ("Cavaco de madeira", "m3"), ("Lenha reciclável", "m3"),
+            ]},
+            {"nome": "Madeira Contaminada", "tipos_unidade": [
+                ("Madeira contaminada", "m3"), ("MDF", "m3"),
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Têxteis
     {
-        "nome": "Automotivo",
-        "slug": "automotivo",
-        "cor_hex": "#0ea5e9",
-        "icone": "car",
-        "ordem": 90,
+        "categoria": {"nome": "Têxteis", "cor_hex": "#ec4899", "icone": "shirt", "ordem": 90},
         "subcategorias": [
-            ("Pneus", "pneus", "unidade"),
-            ("Baterias chumbo-ácido", "bateria-chumbo", "kg"),
-            ("Catalisadores", "catalisadores", "unidade"),
+            {"nome": "Tecidos", "tipos": [
+                "Retalho", "Roupa usada", "Jeans", "Algodão",
+                "Poliéster", "TNT", "Tecido industrial",
+            ]},
+            {"nome": "Outros Têxteis", "tipos": [
+                "Espuma", "Couro",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Borracha / Pneus
     {
-        "nome": "Orgânicos",
-        "slug": "organicos",
-        "cor_hex": "#22c55e",
-        "icone": "leaf",
-        "ordem": 100,
+        "categoria": {"nome": "Borracha / Pneus", "cor_hex": "#1f2937", "icone": "circle", "ordem": 100},
         "subcategorias": [
-            ("Restos de poda", "restos-poda", "m3"),
-            ("Compostáveis", "compostaveis", "kg"),
+            {"nome": "Pneus", "tipos_unidade": [
+                ("Pneus", "unidade"), ("Câmara de ar", "unidade"),
+            ]},
+            {"nome": "Borracha Industrial", "tipos": [
+                "Borracha industrial", "Correia", "EVA", "Silicone industrial",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Resíduos Orgânicos
     {
-        "nome": "Hospitalar (regulado)",
-        "slug": "hospitalar",
-        "cor_hex": "#dc2626",
-        "icone": "alert-triangle",
-        "ordem": 110,
+        "categoria": {"nome": "Resíduos Orgânicos", "cor_hex": "#22c55e", "icone": "leaf", "ordem": 110},
         "subcategorias": [
-            ("Grupo A — infectante", "hospitalar-a-infectante", "kg", True, ["licenca_ambiental", "cadri"]),
-            ("Grupo E — perfurocortante", "hospitalar-e-perfurocortante", "kg", True, ["licenca_ambiental", "cadri"]),
+            {"nome": "Orgânicos Alimentares", "tipos_unidade": [
+                ("Restos alimentares", "kg"), ("Resíduo agrícola", "kg"),
+                ("Compostagem", "kg"), ("Esterco", "kg"),
+            ]},
+            {"nome": "Orgânicos Vegetais", "tipos_unidade": [
+                ("Poda", "m3"), ("Madeira orgânica", "m3"),
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Resíduos Industriais
     {
-        "nome": "Químicos (regulado)",
-        "slug": "quimicos",
-        "cor_hex": "#7f1d1d",
-        "icone": "flask-conical",
-        "ordem": 120,
+        "categoria": {"nome": "Resíduos Industriais", "cor_hex": "#7c3aed", "icone": "factory", "ordem": 120},
         "subcategorias": [
-            ("Solventes orgânicos", "solventes-organicos", "l", True, ["licenca_ambiental", "cadri", "mtr"]),
-            ("Tintas industriais", "tintas-industriais", "l", True, ["licenca_ambiental"]),
+            {"nome": "Resíduos de Processo", "tipos": [
+                "Borra industrial", "Lodo industrial", "Cinzas", "Escória",
+            ]},
+            {"nome": "Resíduos Contaminados", "tipos": [
+                "Rejeito químico", "Resíduo contaminado", "Embalagem contaminada",
+            ]},
         ],
     },
+    # ------------------------------------------------------------------ Resíduos Hospitalares (REGULADO)
     {
-        "nome": "Pallets",
-        "slug": "pallets",
-        "cor_hex": "#a16207",
-        "icone": "package",
-        "ordem": 130,
+        "categoria": {"nome": "Resíduos Hospitalares / Médicos", "cor_hex": "#dc2626", "icone": "alert-triangle", "ordem": 130},
         "subcategorias": [
-            ("Pallet PBR padrão", "pallet-pbr", "unidade"),
-            ("Pallet descartável", "pallet-descartavel", "unidade"),
+            {
+                "nome": "Infectantes",
+                "regulada": True,
+                "documentos": _DOCS_REGULADO_PADRAO,
+                "tipos": [
+                    "Perfurocortantes", "Seringas", "Luvas", "Máscaras",
+                    "Material contaminado", "Resíduo biológico", "Resíduo infectante",
+                ],
+            },
+            {
+                "nome": "Químicos Hospitalares",
+                "regulada": True,
+                "documentos": _DOCS_REGULADO_PADRAO,
+                "tipos": [
+                    "Medicamentos vencidos", "Resíduo químico hospitalar",
+                ],
+            },
+        ],
+    },
+    # ------------------------------------------------------------------ Construção Civil
+    {
+        "categoria": {"nome": "Construção Civil", "cor_hex": "#6b7280", "icone": "hammer", "ordem": 140},
+        "subcategorias": [
+            {"nome": "Entulho", "tipos_unidade": [
+                ("Entulho", "m3"), ("Concreto", "m3"), ("Tijolo", "m3"),
+                ("Cerâmica", "m3"), ("Gesso", "kg"), ("Areia contaminada", "m3"),
+                ("Telha", "m3"), ("Cano PVC", "kg"), ("Madeira de obra", "m3"),
+            ]},
+        ],
+    },
+    # ------------------------------------------------------------------ Automotivo
+    {
+        "categoria": {"nome": "Automotivo", "cor_hex": "#0ea5e9", "icone": "car", "ordem": 150},
+        "subcategorias": [
+            {"nome": "Peças Automotivas", "tipos_unidade": [
+                ("Radiador", "unidade"), ("Catalisador", "unidade"),
+                ("Bateria automotiva", "unidade"), ("Para-choque", "unidade"),
+                ("Vidro automotivo", "unidade"), ("Chicote elétrico", "kg"),
+                ("Pneu", "unidade"), ("Peças metálicas", "kg"),
+            ]},
+            {"nome": "Fluidos Automotivos", "tipos_unidade": [
+                ("Óleo usado", "l"),
+            ]},
+        ],
+    },
+    # ------------------------------------------------------------------ Químicos (REGULADO)
+    {
+        "categoria": {"nome": "Químicos", "cor_hex": "#7f1d1d", "icone": "flask-conical", "ordem": 160},
+        "subcategorias": [
+            {
+                "nome": "Solventes e Ácidos",
+                "regulada": True,
+                "documentos": _DOCS_REGULADO_QUIMICO,
+                "tipos_unidade": [
+                    ("Solventes", "l"), ("Ácidos", "l"), ("Bases químicas", "l"),
+                ],
+            },
+            {
+                "nome": "Outros Químicos",
+                "regulada": True,
+                "documentos": _DOCS_REGULADO_QUIMICO,
+                "tipos_unidade": [
+                    ("Resinas", "kg"), ("Catalisadores", "kg"),
+                    ("Tintas", "l"), ("Vernizes", "l"), ("Cola industrial", "kg"),
+                ],
+            },
+        ],
+    },
+    # ------------------------------------------------------------------ Outros Recicláveis
+    {
+        "categoria": {"nome": "Outros Recicláveis", "cor_hex": "#06b6d4", "icone": "package", "ordem": 170},
+        "subcategorias": [
+            {"nome": "Embalagens Especiais", "tipos": [
+                "Caixa de leite", "Embalagem longa vida", "Isopor",
+                "Cápsula de café", "Embalagem aluminizada", "Embalagem flexível",
+            ]},
+            {"nome": "Material Processado", "tipos": [
+                "Material prensado", "Material moído", "Material separado por cor",
+                "Material separado por tipo",
+            ]},
+            {"nome": "Resíduo Geral", "tipos": [
+                "Resíduo misto", "Material limpo", "Material contaminado",
+            ]},
         ],
     },
 ]
 
 
+def _iter_tipos(sub_def: dict) -> Iterable[tuple[str, str]]:
+    """Normaliza 'tipos' (lista de nomes) e 'tipos_unidade' (lista de (nome, un))."""
+    for nome in sub_def.get("tipos", []) or []:
+        yield nome, "kg"
+    for nome, unidade in sub_def.get("tipos_unidade", []) or []:
+        yield nome, unidade
+
+
 async def _seed_categorias(db: AsyncSession) -> None:
-    for cat_def in CATALOGO:
-        cat = await db.scalar(select(Categoria).where(Categoria.slug == cat_def["slug"]))
+    """Popula categoria + subcategoria + tipo_material idempotentemente.
+
+    Cada nível faz upsert por slug. Re-runs não duplicam.
+    """
+    for cat_def in TAXONOMIA:
+        cdata = cat_def["categoria"]
+        cat_slug = _slug(cdata["nome"])
+
+        cat = await db.scalar(select(Categoria).where(Categoria.slug == cat_slug))
         if cat is None:
             cat = Categoria(
-                nome=cat_def["nome"],
-                slug=cat_def["slug"],
-                cor_hex=cat_def["cor_hex"],
-                icone=cat_def["icone"],
-                ordem=cat_def["ordem"],
+                nome=cdata["nome"],
+                slug=cat_slug,
+                cor_hex=cdata["cor_hex"],
+                icone=cdata["icone"],
+                ordem=cdata["ordem"],
                 ativo=True,
             )
             db.add(cat)
             await db.flush()
-        for idx, sub_def in enumerate(cat_def["subcategorias"]):
-            nome, slug, unidade = sub_def[0], sub_def[1], sub_def[2]
-            regulada = sub_def[3] if len(sub_def) > 3 else False
-            docs = sub_def[4] if len(sub_def) > 4 else []
-            existing = await db.scalar(
+
+        for sub_idx, sub_def in enumerate(cat_def["subcategorias"]):
+            sub_slug = _slug(sub_def["nome"])
+            sub = await db.scalar(
                 select(Subcategoria).where(
-                    Subcategoria.categoria_id == cat.id, Subcategoria.slug == slug
+                    Subcategoria.categoria_id == cat.id,
+                    Subcategoria.slug == sub_slug,
                 )
             )
-            if existing is None:
-                db.add(
-                    Subcategoria(
-                        categoria_id=cat.id,
-                        nome=nome,
-                        slug=slug,
-                        unidade_padrao=unidade,
-                        requer_validacao_documental=regulada,
-                        documentos_exigidos=list(docs),
-                        atributos_especificos={},
-                        ordem=10 * (idx + 1),
-                        ativo=True,
+            if sub is None:
+                sub = Subcategoria(
+                    categoria_id=cat.id,
+                    nome=sub_def["nome"],
+                    slug=sub_slug,
+                    requer_validacao_documental=bool(sub_def.get("regulada", False)),
+                    documentos_exigidos=list(sub_def.get("documentos", []) or []),
+                    ordem=10 * (sub_idx + 1),
+                    ativo=True,
+                )
+                db.add(sub)
+                await db.flush()
+
+            for tipo_idx, (tipo_nome, unidade) in enumerate(_iter_tipos(sub_def)):
+                tipo_slug = _slug(tipo_nome)
+                existing = await db.scalar(
+                    select(TipoMaterial).where(
+                        TipoMaterial.subcategoria_id == sub.id,
+                        TipoMaterial.slug == tipo_slug,
                     )
                 )
+                if existing is None:
+                    db.add(
+                        TipoMaterial(
+                            subcategoria_id=sub.id,
+                            nome=tipo_nome,
+                            slug=tipo_slug,
+                            unidade_padrao=unidade,
+                            atributos_especificos={},
+                            ordem=10 * (tipo_idx + 1),
+                            ativo=True,
+                        )
+                    )
     await db.flush()
 
 
@@ -337,11 +536,10 @@ async def _seed_tipos_documento(db: AsyncSession) -> None:
 
 
 # =============================================================================
-# Planos por Papel — todos com plano gratuito; alguns com pago superior
+# Planos por Papel
 # =============================================================================
 
 def _planos_padrao() -> Iterable[dict]:
-    """Plano gratuito + pago para cada papel marketplaceable."""
     papeis = [
         PapelTipo.CATADOR,
         PapelTipo.COLETOR,
@@ -372,7 +570,6 @@ def _planos_padrao() -> Iterable[dict]:
             "preco_mensal_centavos": 4990,
             "gratuito": False,
         }
-    # Anuidade institucional (Órgão Público): registrada para Prefeitura/Órgão Estadual
     for p in (PapelTipo.PREFEITURA, PapelTipo.ORGAO_ESTADUAL):
         yield {
             "papel": p,
@@ -426,7 +623,7 @@ async def _seed_pacotes(db: AsyncSession) -> None:
 
 
 # =============================================================================
-# Superadmin inicial (Usuario + PerfilInterno)
+# Superadmin inicial
 # =============================================================================
 
 async def _seed_superadmin(db: AsyncSession) -> None:

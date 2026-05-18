@@ -7,6 +7,9 @@ import type {
   AnuncioServico,
   AnuncioVenda,
   CondicaoEquipamento,
+  CondicaoForma,
+  CondicaoLimpeza,
+  CondicaoUmidade,
   FrequenciaAnuncio,
   ID,
   ModalidadeMaquina,
@@ -17,11 +20,19 @@ import type {
 export interface BuscaAnuncioParams {
   categoria_id?: ID;
   subcategoria_id?: ID;
+  tipo_material_id?: ID;
   lat?: number;
   lng?: number;
   raio_km?: number;
   preco_min?: number;
   preco_max?: number;
+  // Filtro mútuo de visibilidade por volume
+  volume_minimo_kg?: number; // usado em buscar anúncios (comprador exige X kg)
+  volume_disponivel_kg?: number; // usado em buscar ofertas (vendedor tem X kg)
+  // Condição (grupos exclusivos)
+  condicao_limpeza?: CondicaoLimpeza;
+  condicao_umidade?: CondicaoUmidade;
+  condicao_forma?: CondicaoForma;
   page?: number;
   page_size?: number;
 }
@@ -32,10 +43,11 @@ export const anunciosVendaApi = {
   get: (id: ID) => api.get<AnuncioVenda>(`/anuncios-venda/${id}`).then((r) => r.data),
   criar: (payload: {
     papel_id: ID;
-    subcategoria_id: ID;
-    titulo: string;
-    descricao?: string;
+    tipo_material_id: ID;
     atributos: Record<string, unknown>;
+    condicao_limpeza?: CondicaoLimpeza;
+    condicao_umidade?: CondicaoUmidade;
+    condicao_forma?: CondicaoForma;
     localizacao_real: { lat: number; lng: number };
     territorio: 'urbano' | 'rural';
     preco_pretendido: number | string;
@@ -44,7 +56,7 @@ export const anunciosVendaApi = {
     frequencia: FrequenciaAnuncio;
     intervalo_geracao?: string;
     prazo_validade: string;
-    fotos: string[];
+    fotos: string[]; // máximo 3
     aceita_alerta_pago_de_terceiros?: boolean;
   }) => api.post<AnuncioVenda>('/anuncios-venda/', payload).then((r) => r.data),
   atualizar: (id: ID, payload: Partial<AnuncioVenda>) =>
@@ -66,7 +78,7 @@ export const ofertasCompraApi = {
   get: (id: ID) => api.get<OfertaCompra>(`/ofertas-compra/${id}`).then((r) => r.data),
   criar: (payload: {
     papel_id: ID;
-    subcategoria_id: ID;
+    tipo_material_id: ID;
     titulo: string;
     descricao?: string;
     especificacao: Record<string, unknown>;
@@ -74,6 +86,10 @@ export const ofertasCompraApi = {
     unidade: string;
     volume_min: number | string;
     volume_max?: number | string;
+    volume_minimo_kg?: number; // filtro mútuo de visibilidade
+    condicao_limpeza?: CondicaoLimpeza;
+    condicao_umidade?: CondicaoUmidade;
+    condicao_forma?: CondicaoForma;
     localizacao: { lat: number; lng: number };
     raio_km: number;
     retira: boolean;

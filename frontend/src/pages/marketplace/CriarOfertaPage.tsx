@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { extractErrorMessage } from '@/api/client';
 import { AppLayout } from '@/components/AppLayout';
+import { ConditionSelector } from '@/components/ConditionSelector';
 import { MapPicker } from '@/components/MapPicker';
 import { TopBar } from '@/components/TopBar';
 import { Button } from '@/components/ui/button';
@@ -13,9 +14,10 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { showToast } from '@/components/ui/toaster';
 import { useCriarOferta } from '@/hooks/useAnuncios';
-import { useCategorias, useSubcategorias } from '@/hooks/useCatalogo';
+import { useCategorias, useSubcategorias, useTiposMaterial } from '@/hooks/useCatalogo';
 import { useContaAtiva, usePapeis } from '@/hooks/useContaAtiva';
 import { useGeolocalizacao } from '@/hooks/useGeolocalizacao';
+import type { CondicaoForma, CondicaoLimpeza, CondicaoUmidade } from '@/types/api';
 import { SAO_PAULO_CAPITAL, type LatLng } from '@/utils/geo';
 import { toISOInputDate } from '@/utils/dates';
 
@@ -27,21 +29,37 @@ export default function CriarOfertaPage() {
   const { data: papeis } = usePapeis(conta?.id ?? null);
 
   const [categoriaId, setCategoriaId] = useState('');
+  const [subcategoriaId, setSubcategoriaId] = useState('');
+  const [tipoMaterialId, setTipoMaterialId] = useState('');
   const { data: subs } = useSubcategorias(categoriaId || null);
+  const { data: tipos } = useTiposMaterial(subcategoriaId || null);
+
+  useEffect(() => {
+    setSubcategoriaId('');
+    setTipoMaterialId('');
+  }, [categoriaId]);
+  useEffect(() => {
+    setTipoMaterialId('');
+  }, [subcategoriaId]);
+
+  const tipoSelecionado = tipos?.find((t) => t.id === tipoMaterialId);
 
   const [form, setForm] = useState({
     papel_id: '',
-    subcategoria_id: '',
     titulo: '',
     descricao: '',
     preco_paga: '',
     unidade: 'kg',
     volume_min: '',
     volume_max: '',
+    volume_minimo_kg: '',
     raio_km: 25,
     retira: false,
     prazo_validade: toISOInputDate(new Date(Date.now() + 30 * 86400_000)),
   });
+  const [condicaoLimpeza, setCondicaoLimpeza] = useState<CondicaoLimpeza | null>(null);
+  const [condicaoUmidade, setCondicaoUmidade] = useState<CondicaoUmidade | null>(null);
+  const [condicaoForma, setCondicaoForma] = useState<CondicaoForma | null>(null);
   const [loc, setLoc] = useState<LatLng>(SAO_PAULO_CAPITAL);
 
   useEffect(() => {
@@ -49,18 +67,23 @@ export default function CriarOfertaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (tipoSelecionado) setForm((f) => ({ ...f, unidade: tipoSelecionado.unidade_padrao }));
+  }, [tipoSelecionado]);
+
   const criar = useCriarOferta();
+  const tipoEscolhido = Boolean(tipoMaterialId);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.papel_id || !form.subcategoria_id) {
-      showToast({ title: 'Selecione Papel e Subcategoria', variant: 'warning' });
+    if (!form.papel_id || !tipoMaterialId) {
+      showToast({ title: 'Selecione Papel, Categoria, Subcategoria e Tipo', variant: 'warning' });
       return;
     }
     criar.mutate(
       {
         papel_id: form.papel_id,
-        subcategoria_id: form.subcategoria_id,
+        tipo_material_id: tipoMaterialId,
         titulo: form.titulo,
         descricao: form.descricao || undefined,
         especificacao: {},
@@ -68,6 +91,10 @@ export default function CriarOfertaPage() {
         unidade: form.unidade,
         volume_min: Number(form.volume_min),
         volume_max: form.volume_max ? Number(form.volume_max) : undefined,
+        volume_minimo_kg: form.volume_minimo_kg ? Number(form.volume_minimo_kg) : undefined,
+        condicao_limpeza: condicaoLimpeza ?? undefined,
+        condicao_umidade: condicaoUmidade ?? undefined,
+        condicao_forma: condicaoForma ?? undefined,
         localizacao: loc,
         raio_km: form.raio_km,
         retira: form.retira,
@@ -101,7 +128,8 @@ export default function CriarOfertaPage() {
           </Select>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        {/* === 3 dropdowns encadeados === */}
+        <div className="space-y-3">
           <div>
             <Label>Categoria</Label>
             <Select value={categoriaId} onValueChange={setCategoriaId}>
@@ -115,12 +143,10 @@ export default function CriarOfertaPage() {
           </div>
           <div>
             <Label>Subcategoria</Label>
-            <Select
-              value={form.subcategoria_id}
-              onValueChange={(v) => setForm({ ...form, subcategoria_id: v })}
-              disabled={!categoriaId}
-            >
-              <SelectTrigger><SelectValue /></SelectTrigger>
+            <Select value={subcategoriaId} onValueChange={setSubcategoriaId} disabled={!categoriaId}>
+              <SelectTrigger>
+                <SelectValue placeholder={categoriaId ? 'Selecione' : 'Escolha uma categoria primeiro'} />
+              </SelectTrigger>
               <SelectContent>
                 {subs?.map((s) => (
                   <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>
@@ -128,96 +154,153 @@ export default function CriarOfertaPage() {
               </SelectContent>
             </Select>
           </div>
-        </div>
-
-        <Input
-          required
-          minLength={3}
-          placeholder="Título da demanda"
-          value={form.titulo}
-          onChange={(e) => setForm({ ...form, titulo: e.target.value })}
-        />
-
-        <Textarea
-          placeholder="Especificações detalhadas"
-          value={form.descricao}
-          onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-        />
-
-        <div className="grid grid-cols-2 gap-3">
           <div>
-            <Label>Preço pago (R$)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              required
-              value={form.preco_paga}
-              onChange={(e) => setForm({ ...form, preco_paga: e.target.value })}
-              className="font-mono"
-            />
-          </div>
-          <div>
-            <Label>Unidade</Label>
-            <Input value={form.unidade} onChange={(e) => setForm({ ...form, unidade: e.target.value })} />
-          </div>
-          <div>
-            <Label>Volume mín.</Label>
-            <Input
-              type="number"
-              required
-              value={form.volume_min}
-              onChange={(e) => setForm({ ...form, volume_min: e.target.value })}
-              className="font-mono"
-            />
-          </div>
-          <div>
-            <Label>Volume máx. (opcional)</Label>
-            <Input
-              type="number"
-              value={form.volume_max}
-              onChange={(e) => setForm({ ...form, volume_max: e.target.value })}
-              className="font-mono"
-            />
+            <Label>Tipo de Material</Label>
+            <Select value={tipoMaterialId} onValueChange={setTipoMaterialId} disabled={!subcategoriaId}>
+              <SelectTrigger>
+                <SelectValue placeholder={subcategoriaId ? 'Selecione' : 'Escolha uma subcategoria primeiro'} />
+              </SelectTrigger>
+              <SelectContent>
+                {tipos?.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.nome}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
-        <div>
-          <Label>Raio (km)</Label>
+        <div className={tipoEscolhido ? '' : 'pointer-events-none opacity-40'} aria-disabled={!tipoEscolhido}>
           <Input
-            type="number"
-            min={1}
-            max={500}
-            value={form.raio_km}
-            onChange={(e) => setForm({ ...form, raio_km: Number(e.target.value) })}
-            className="font-mono"
+            required={tipoEscolhido}
+            minLength={3}
+            placeholder="Título da demanda"
+            value={form.titulo}
+            onChange={(e) => setForm({ ...form, titulo: e.target.value })}
           />
-        </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-neutral-200 p-3">
-          <div>
-            <p className="text-sm font-semibold">Eu retiro o material</p>
-            <p className="text-xs text-neutral-500">Comprador busca no local do vendedor</p>
+          <Textarea
+            placeholder="Especificações detalhadas"
+            value={form.descricao}
+            onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+            className="mt-3"
+          />
+
+          {/* === Condição buscada === */}
+          <div className="space-y-3 rounded-lg border border-neutral-200 p-3 mt-3">
+            <p className="text-sm font-semibold text-neutral-800">Condição buscada (opcional)</p>
+            <ConditionSelector group="limpeza" value={condicaoLimpeza} onChange={setCondicaoLimpeza} />
+            <ConditionSelector group="umidade" value={condicaoUmidade} onChange={setCondicaoUmidade} />
+            <ConditionSelector group="forma" value={condicaoForma} onChange={setCondicaoForma} />
           </div>
-          <Switch checked={form.retira} onCheckedChange={(v) => setForm({ ...form, retira: v })} />
+
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div>
+              <Label>Preço pago (R$)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                required={tipoEscolhido}
+                value={form.preco_paga}
+                onChange={(e) => setForm({ ...form, preco_paga: e.target.value })}
+                className="font-mono"
+              />
+            </div>
+            <div>
+              <Label>Unidade</Label>
+              <Input value={form.unidade} onChange={(e) => setForm({ ...form, unidade: e.target.value })} />
+            </div>
+            <div>
+              <Label>Volume mín.</Label>
+              <Input
+                type="number"
+                required={tipoEscolhido}
+                value={form.volume_min}
+                onChange={(e) => setForm({ ...form, volume_min: e.target.value })}
+                className="font-mono"
+              />
+            </div>
+            <div>
+              <Label>Volume máx. (opcional)</Label>
+              <Input
+                type="number"
+                value={form.volume_max}
+                onChange={(e) => setForm({ ...form, volume_max: e.target.value })}
+                className="font-mono"
+              />
+            </div>
+          </div>
+
+          {/* === Filtro mútuo de visibilidade === */}
+          <div className="mt-3 rounded-lg bg-neutral-50 border border-neutral-200 p-3">
+            <Label htmlFor="volmin">Volume mínimo do vendedor (kg) — filtro de visibilidade</Label>
+            <Input
+              id="volmin"
+              type="number"
+              min={0}
+              placeholder="ex.: 30 (vazio = sem restrição)"
+              value={form.volume_minimo_kg}
+              onChange={(e) => setForm({ ...form, volume_minimo_kg: e.target.value })}
+              className="font-mono"
+            />
+            <p className="mt-1 text-[11px] text-neutral-500">
+              Vendedores com volume estimado abaixo deste número não verão sua oferta — e você não os verá.
+            </p>
+          </div>
+
+          {/* === Raio (slider 1-500km) === */}
+          <div className="mt-3">
+            <div className="flex items-baseline justify-between">
+              <Label>Raio de busca</Label>
+              <span className="font-mono text-sm font-semibold text-accent-600">{form.raio_km} km</span>
+            </div>
+            <input
+              type="range"
+              min={1}
+              max={500}
+              step={1}
+              value={form.raio_km}
+              onChange={(e) => setForm({ ...form, raio_km: Number(e.target.value) })}
+              className="w-full accent-accent-500"
+              aria-label="Raio em km, mínimo 1, máximo 500"
+            />
+            <div className="flex justify-between text-[10px] text-neutral-500">
+              <span>1 km</span>
+              <span>500 km</span>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between rounded-lg border border-neutral-200 p-3">
+            <div>
+              <p className="text-sm font-semibold">Eu retiro o material</p>
+              <p className="text-xs text-neutral-500">Comprador busca no local do vendedor</p>
+            </div>
+            <Switch checked={form.retira} onCheckedChange={(v) => setForm({ ...form, retira: v })} />
+          </div>
+
+          <div className="mt-3">
+            <Label>Localização do comprador</Label>
+            <MapPicker value={loc} onChange={setLoc} height={240} />
+          </div>
+
+          <div className="mt-3">
+            <Label>Válido até</Label>
+            <Input
+              type="date"
+              required={tipoEscolhido}
+              value={form.prazo_validade}
+              onChange={(e) => setForm({ ...form, prazo_validade: e.target.value })}
+            />
+          </div>
         </div>
 
-        <div>
-          <Label>Localização do comprador</Label>
-          <MapPicker value={loc} onChange={setLoc} height={240} />
-        </div>
-
-        <div>
-          <Label>Válido até</Label>
-          <Input
-            type="date"
-            required
-            value={form.prazo_validade}
-            onChange={(e) => setForm({ ...form, prazo_validade: e.target.value })}
-          />
-        </div>
-
-        <Button type="submit" loading={criar.isPending} variant="accent" className="w-full">
-          Publicar oferta de compra
+        <Button
+          type="submit"
+          loading={criar.isPending}
+          variant="accent"
+          disabled={!tipoEscolhido}
+          className="w-full"
+        >
+          {tipoEscolhido ? 'Publicar oferta de compra' : 'Selecione Tipo de Material para continuar'}
         </Button>
       </form>
     </AppLayout>

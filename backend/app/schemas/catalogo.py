@@ -1,4 +1,4 @@
-"""Schemas — Categoria, Subcategoria, AtributoComum."""
+"""Schemas — Categoria, Subcategoria (intermediário), TipoMaterial (granular), AtributoComum."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from app.schemas.common import ORMModel, TimestampedORM
+from app.schemas.common import TimestampedORM
 
 
 # === Categoria ===
@@ -35,16 +35,14 @@ class CategoriaUpdate(BaseModel):
 class CategoriaRead(CategoriaBase, TimestampedORM): ...
 
 
-# === Subcategoria ===
+# === Subcategoria (nível intermediário) ===
 
 class SubcategoriaBase(BaseModel):
     categoria_id: UUID
-    nome: Annotated[str, StringConstraints(min_length=2, max_length=150)]
-    slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9-]+$", max_length=150)]
-    unidade_padrao: Annotated[str, StringConstraints(max_length=20)]
+    nome: Annotated[str, StringConstraints(min_length=2, max_length=120)]
+    slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9-]+$", max_length=120)]
     requer_validacao_documental: bool = False
     documentos_exigidos: list[str] = Field(default_factory=list)
-    atributos_especificos: dict = Field(default_factory=dict)
     ordem: int = 100
     ativo: bool = True
 
@@ -54,15 +52,39 @@ class SubcategoriaCreate(SubcategoriaBase): ...
 
 class SubcategoriaUpdate(BaseModel):
     nome: str | None = None
-    unidade_padrao: str | None = None
     requer_validacao_documental: bool | None = None
     documentos_exigidos: list[str] | None = None
-    atributos_especificos: dict | None = None
     ordem: int | None = None
     ativo: bool | None = None
 
 
 class SubcategoriaRead(SubcategoriaBase, TimestampedORM): ...
+
+
+# === TipoMaterial (nível granular) ===
+
+class TipoMaterialBase(BaseModel):
+    subcategoria_id: UUID
+    nome: Annotated[str, StringConstraints(min_length=2, max_length=150)]
+    slug: Annotated[str, StringConstraints(pattern=r"^[a-z0-9-]+$", max_length=150)]
+    unidade_padrao: Annotated[str, StringConstraints(max_length=20)]
+    atributos_especificos: dict = Field(default_factory=dict)
+    ordem: int = 100
+    ativo: bool = True
+
+
+class TipoMaterialCreate(TipoMaterialBase): ...
+
+
+class TipoMaterialUpdate(BaseModel):
+    nome: str | None = None
+    unidade_padrao: str | None = None
+    atributos_especificos: dict | None = None
+    ordem: int | None = None
+    ativo: bool | None = None
+
+
+class TipoMaterialRead(TipoMaterialBase, TimestampedORM): ...
 
 
 # === AtributoComum (dicionário admin) ===

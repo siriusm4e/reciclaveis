@@ -47,6 +47,8 @@ from app.api.routes import (
     papeis,
     pedidos_coleta,
     preferencias,
+    tipos,
+    tipos_documento,
     usuarios,
 )
 
@@ -145,7 +147,9 @@ app.include_router(papeis.router_est)
 # Catálogo / documentos
 app.include_router(categorias.router)
 app.include_router(categorias.sub_router)
+app.include_router(tipos.router)
 app.include_router(documentos.router)
+app.include_router(tipos_documento.router)
 
 # Marketplace
 app.include_router(anuncios_venda.router)

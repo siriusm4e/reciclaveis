@@ -30,12 +30,17 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
-from app.models.enums import OfertaCompraStatus
+from app.models.enums import (
+    CondicaoForma,
+    CondicaoLimpeza,
+    CondicaoUmidade,
+    OfertaCompraStatus,
+)
 
 if TYPE_CHECKING:
     from app.models.conta import Conta
     from app.models.papel import PapelAtivado
-    from app.models.subcategoria import Subcategoria
+    from app.models.tipo_material import TipoMaterial
 
 
 class OfertaCompra(Base, UUIDPKMixin, TimestampMixin):
@@ -50,8 +55,8 @@ class OfertaCompra(Base, UUIDPKMixin, TimestampMixin):
     papel_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("papel_ativado.id", ondelete="RESTRICT"), nullable=False
     )
-    subcategoria_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("subcategoria.id"), nullable=False, index=True
+    tipo_material_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("tipo_material.id"), nullable=False, index=True
     )
 
     titulo: Mapped[str] = mapped_column(String(150), nullable=False)
@@ -63,6 +68,39 @@ class OfertaCompra(Base, UUIDPKMixin, TimestampMixin):
     unidade: Mapped[str] = mapped_column(String(20), nullable=False)
     volume_min: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     volume_max: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+
+    # Volume mínimo em kg que o vendedor precisa ter para ESTA oferta aparecer
+    # para ele em buscas. Filtro mútuo: vendedor com volume abaixo deste número
+    # não vê a oferta; comprador não recebe match de vendedores sub-volume.
+    volume_minimo_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # === Condição buscada (grupos exclusivos no formulário/filtro) ===
+    # Mesmo tipo Postgres compartilhado com AnuncioVenda — values_callable
+    # mantém serialização lowercase consistente com o que está no DB.
+    condicao_limpeza: Mapped[CondicaoLimpeza | None] = mapped_column(
+        SAEnum(
+            CondicaoLimpeza,
+            name="condicao_limpeza",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=True,
+    )
+    condicao_umidade: Mapped[CondicaoUmidade | None] = mapped_column(
+        SAEnum(
+            CondicaoUmidade,
+            name="condicao_umidade",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=True,
+    )
+    condicao_forma: Mapped[CondicaoForma | None] = mapped_column(
+        SAEnum(
+            CondicaoForma,
+            name="condicao_forma",
+            values_callable=lambda e: [m.value for m in e],
+        ),
+        nullable=True,
+    )
 
     # Localização do comprador (Estabelecimento principal — não tem privacidade
     # ofuscada, é endereço comercial de quem compra).
@@ -96,4 +134,4 @@ class OfertaCompra(Base, UUIDPKMixin, TimestampMixin):
 
     conta: Mapped["Conta"] = relationship("Conta")
     papel: Mapped["PapelAtivado"] = relationship("PapelAtivado")
-    subcategoria: Mapped["Subcategoria"] = relationship("Subcategoria")
+    tipo_material: Mapped["TipoMaterial"] = relationship("TipoMaterial")

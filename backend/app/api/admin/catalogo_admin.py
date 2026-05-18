@@ -1,4 +1,4 @@
-"""Backoffice — Categorias, Subcategorias, TiposDocumento."""
+"""Backoffice — Categorias, Subcategorias (intermediário), TiposMaterial (granular), TiposDocumento."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.repositories.catalogo import (
     CategoriaRepository,
     SubcategoriaRepository,
+    TipoMaterialRepository,
 )
 from app.repositories.documento import TipoDocumentoRepository
 from app.schemas.catalogo import (
@@ -23,6 +24,9 @@ from app.schemas.catalogo import (
     SubcategoriaCreate,
     SubcategoriaRead,
     SubcategoriaUpdate,
+    TipoMaterialCreate,
+    TipoMaterialRead,
+    TipoMaterialUpdate,
 )
 from app.schemas.documentos import (
     TipoDocumentoCreate,
@@ -67,7 +71,7 @@ async def atualizar_categoria(
     return c
 
 
-# === Subcategorias ===
+# === Subcategorias (nível intermediário) ===
 
 @router.post(
     "/subcategorias/",
@@ -98,6 +102,39 @@ async def atualizar_subcategoria(
     s = await svc.atualizar_subcategoria(s, **payload.model_dump(exclude_unset=True))
     await db.commit()
     return s
+
+
+# === Tipos de Material (nível granular) ===
+
+@router.post(
+    "/tipos-material/",
+    response_model=TipoMaterialRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def criar_tipo_material(
+    payload: TipoMaterialCreate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    svc = CatalogoService(db)
+    t = await svc.criar_tipo_material(**payload.model_dump())
+    await db.commit()
+    return t
+
+
+@router.patch("/tipos-material/{tipo_id}", response_model=TipoMaterialRead)
+async def atualizar_tipo_material(
+    tipo_id: UUID,
+    payload: TipoMaterialUpdate,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    repo = TipoMaterialRepository(db)
+    t = await repo.get(tipo_id)
+    if t is None:
+        raise NotFoundError("Tipo de Material não encontrado")
+    svc = CatalogoService(db)
+    t = await svc.atualizar_tipo_material(t, **payload.model_dump(exclude_unset=True))
+    await db.commit()
+    return t
 
 
 # === Tipos de Documento ===

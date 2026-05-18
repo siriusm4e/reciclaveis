@@ -1,4 +1,9 @@
-"""Analytics — agregados sem PII e preço de referência."""
+"""Analytics — agregados sem PII e preço de referência.
+
+Após introdução do nível TipoMaterial, mantemos a granularidade dos agregados
+no nível Subcategoria (intermediária), conforme decisão de produto: faz mais
+sentido para a indústria ver preço médio "por PET" do que "por PET cristal".
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,7 @@ from app.models.anuncio_venda import AnuncioVenda
 from app.models.enums import AnuncioVendaStatus
 from app.models.oferta_compra import OfertaCompra
 from app.models.subcategoria import Subcategoria
+from app.models.tipo_material import TipoMaterial
 
 
 MIN_AMOSTRA_PRECO = 5
@@ -26,13 +32,17 @@ class AnalyticsService:
     ) -> dict:
         # AnúnciosVenda publicados servem como amostra de preço
         # (não usamos Negociação por sigilo do valor combinado).
-        stmt = select(
-            func.count(AnuncioVenda.id), func.avg(AnuncioVenda.preco_pretendido)
-        ).where(
-            AnuncioVenda.subcategoria_id == subcategoria_id,
-            AnuncioVenda.status == AnuncioVendaStatus.PUBLICADO,
+        # JOIN AnuncioVenda → TipoMaterial → filtra por subcategoria_id (intermediária).
+        stmt = (
+            select(
+                func.count(AnuncioVenda.id), func.avg(AnuncioVenda.preco_pretendido)
+            )
+            .join(TipoMaterial, TipoMaterial.id == AnuncioVenda.tipo_material_id)
+            .where(
+                TipoMaterial.subcategoria_id == subcategoria_id,
+                AnuncioVenda.status == AnuncioVendaStatus.PUBLICADO,
+            )
         )
-        # cidade — futuramente filtrar via join com estabelecimento próximo / IBGE
         amostra, media = (await self.db.execute(stmt)).first() or (0, None)
         if int(amostra) < MIN_AMOSTRA_PRECO:
             return {
@@ -55,7 +65,8 @@ class AnalyticsService:
                 Subcategoria.nome,
                 func.count(AnuncioVenda.id),
             )
-            .join(AnuncioVenda, AnuncioVenda.subcategoria_id == Subcategoria.id)
+            .join(TipoMaterial, TipoMaterial.subcategoria_id == Subcategoria.id)
+            .join(AnuncioVenda, AnuncioVenda.tipo_material_id == TipoMaterial.id)
             .where(AnuncioVenda.status == AnuncioVendaStatus.PUBLICADO)
             .group_by(Subcategoria.id, Subcategoria.nome)
             .order_by(func.count(AnuncioVenda.id).desc())
@@ -63,13 +74,16 @@ class AnalyticsService:
         return [{"subcategoria_id": sid, "nome": nome, "total": int(total)} for sid, nome, total in rows]
 
     async def liquidez(self) -> list[dict]:
-        sub_ids = await self.db.scalars(select(Subcategoria.id))
+        sub_ids = list(await self.db.scalars(select(Subcategoria.id)))
         out = []
         for sid in sub_ids:
             ofertas = int(
                 await self.db.scalar(
-                    select(func.count()).select_from(AnuncioVenda).where(
-                        AnuncioVenda.subcategoria_id == sid,
+                    select(func.count())
+                    .select_from(AnuncioVenda)
+                    .join(TipoMaterial, TipoMaterial.id == AnuncioVenda.tipo_material_id)
+                    .where(
+                        TipoMaterial.subcategoria_id == sid,
                         AnuncioVenda.status == AnuncioVendaStatus.PUBLICADO,
                     )
                 )
@@ -77,8 +91,11 @@ class AnalyticsService:
             )
             demandas = int(
                 await self.db.scalar(
-                    select(func.count()).select_from(OfertaCompra).where(
-                        OfertaCompra.subcategoria_id == sid,
+                    select(func.count())
+                    .select_from(OfertaCompra)
+                    .join(TipoMaterial, TipoMaterial.id == OfertaCompra.tipo_material_id)
+                    .where(
+                        TipoMaterial.subcategoria_id == sid,
                         OfertaCompra.status == "publicada",  # OfertaCompraStatus.PUBLICADA.value
                     )
                 )

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { ShoppingCart, Tag } from 'lucide-react';
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { AppLayout } from '@/components/AppLayout';
@@ -8,20 +9,35 @@ import { ListingCard } from '@/components/ListingCard';
 import { Button } from '@/components/ui/button';
 import { CenterSpinner, EmptyState, ErrorState, SkeletonList } from '@/components/ui/states';
 import { useBuscarAnuncios, useBuscarOfertas } from '@/hooks/useAnuncios';
-import { useCategorias } from '@/hooks/useCatalogo';
+import { useTipoMaterial } from '@/hooks/useCatalogo';
 import { useContaAtiva } from '@/hooks/useContaAtiva';
 import { useMe } from '@/hooks/useAuth';
 import { useGeolocalizacao } from '@/hooks/useGeolocalizacao';
 import { useMinhasContas } from '@/hooks/useContaAtiva';
+import type { AnuncioVenda } from '@/types/api';
+
+// Card de AnuncioVenda — resolve nome do TipoMaterial via cache do React Query.
+// Anúncios do mesmo tipo compartilham a query (staleTime 5min), evitando N+1 real.
+function AnuncioVendaCard({ a }: { a: AnuncioVenda }) {
+  const { data: tipo } = useTipoMaterial(a.tipo_material_id);
+  return (
+    <ListingCard
+      to={`/anuncios/${a.id}`}
+      titulo={tipo?.nome ?? 'Material à venda'}
+      preco={a.preco_pretendido}
+      unidade={a.unidade}
+      tipo="venda"
+      createdAt={a.created_at}
+    />
+  );
+}
 
 export default function HomePage() {
   const navigate = useNavigate();
   const { data: me } = useMe();
   const conta = useContaAtiva();
   const { data: minhasContas, isLoading: loadingContas } = useMinhasContas();
-  const { data: categorias } = useCategorias();
   const { obterPosicao, position, loading: loadingGeo } = useGeolocalizacao();
-  const [filtroCategoria, setFiltroCategoria] = useState<string | undefined>();
 
   // Auto-pede geolocalização ao entrar
   useEffect(() => {
@@ -38,13 +54,12 @@ export default function HomePage() {
 
   const buscaParams = useMemo(
     () => ({
-      categoria_id: filtroCategoria,
       lat: position?.lat,
       lng: position?.lng,
       raio_km: position ? 50 : undefined,
       page_size: 10,
     }),
-    [filtroCategoria, position],
+    [position],
   );
 
   const anuncios = useBuscarAnuncios(buscaParams);
@@ -76,38 +91,38 @@ export default function HomePage() {
         </span>
       </div>
 
-      {/* Categorias */}
-      <div className="mt-5 px-screen-x">
-        <div className="flex gap-2 overflow-x-auto pb-2 -mx-screen-x px-screen-x">
+      {/* === Ações principais — Comprar / Vender ===
+          COMPRAR  → busca anúncios de venda  (sou potencial comprador)
+          VENDER   → busca ofertas de compra (sou potencial vendedor, busco compradores)
+          Ambas levam para o BuscarPage, que abre no mapa por padrão. */}
+      <section className="mt-5 px-screen-x">
+        <div className="grid grid-cols-2 gap-3">
           <button
             type="button"
-            onClick={() => setFiltroCategoria(undefined)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-              !filtroCategoria ? 'bg-primary-500 text-neutral-0' : 'bg-neutral-100 text-neutral-700'
-            }`}
+            onClick={() => navigate('/marketplace/buscar?modo=comprar')}
+            className="flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-primary-500 px-4 py-3 text-base font-bold uppercase tracking-wide text-neutral-0 shadow-sm transition-shadow duration-base hover:shadow-md"
+            aria-label="Comprar — buscar anúncios de venda no mapa"
           >
-            Todas
+            <ShoppingCart className="h-5 w-5" />
+            <span>Comprar</span>
           </button>
-          {categorias?.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setFiltroCategoria(c.id)}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
-                filtroCategoria === c.id ? 'bg-primary-500 text-neutral-0' : 'bg-neutral-100 text-neutral-700'
-              }`}
-            >
-              {c.nome}
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={() => navigate('/marketplace/buscar?modo=vender')}
+            className="flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-accent-500 px-4 py-3 text-base font-bold uppercase tracking-wide text-neutral-900 shadow-sm transition-shadow duration-base hover:shadow-md"
+            aria-label="Vender — buscar compradores no mapa"
+          >
+            <Tag className="h-5 w-5" />
+            <span>Vender</span>
+          </button>
         </div>
-      </div>
+      </section>
 
       {/* À venda perto */}
-      <section className="mt-5 px-screen-x">
+      <section className="mt-6 px-screen-x">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-lg font-bold tracking-tighter">À venda perto</h2>
-          <Button variant="link" size="sm" onClick={() => navigate('/marketplace/buscar')}>
+          <Button variant="link" size="sm" onClick={() => navigate('/marketplace/buscar?modo=comprar')}>
             Ver tudo
           </Button>
         </div>
@@ -120,15 +135,7 @@ export default function HomePage() {
         ) : (
           <div className="space-y-3">
             {anuncios.data.slice(0, 5).map((a) => (
-              <ListingCard
-                key={a.id}
-                to={`/anuncios/${a.id}`}
-                titulo={a.titulo}
-                preco={a.preco_pretendido}
-                unidade={a.unidade}
-                tipo="venda"
-                createdAt={a.created_at}
-              />
+              <AnuncioVendaCard key={a.id} a={a} />
             ))}
           </div>
         )}
@@ -138,7 +145,7 @@ export default function HomePage() {
       <section className="mt-6 px-screen-x">
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-lg font-bold tracking-tighter">Compradores buscando</h2>
-          <Button variant="link" size="sm" onClick={() => navigate('/marketplace/buscar?tipo=compra')}>
+          <Button variant="link" size="sm" onClick={() => navigate('/marketplace/buscar?modo=vender')}>
             Ver tudo
           </Button>
         </div>

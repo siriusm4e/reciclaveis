@@ -6,11 +6,17 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from app.models.anuncio_venda import AnuncioVenda
 from app.models.assinatura_alerta import AssinaturaAlerta
-from app.models.enums import AnuncioVendaStatus, OfertaCompraStatus
+from app.models.enums import (
+    AnuncioVendaStatus,
+    CondicaoForma,
+    CondicaoLimpeza,
+    CondicaoUmidade,
+    OfertaCompraStatus,
+)
 from app.models.oferta_compra import OfertaCompra
 from app.repositories.base import BaseRepository
 from app.utils.geo import st_dwithin_geography
@@ -24,27 +30,50 @@ class AnuncioVendaRepository(BaseRepository[AnuncioVenda]):
         *,
         categoria_id: UUID | None = None,
         subcategoria_id: UUID | None = None,
+        tipo_material_id: UUID | None = None,
         lat: float | None = None,
         lng: float | None = None,
         raio_km: int | None = None,
         preco_min: Decimal | None = None,
         preco_max: Decimal | None = None,
+        volume_minimo_kg: float | None = None,
+        condicao_limpeza: CondicaoLimpeza | None = None,
+        condicao_umidade: CondicaoUmidade | None = None,
+        condicao_forma: CondicaoForma | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AnuncioVenda]:
         from app.models.subcategoria import Subcategoria
+        from app.models.tipo_material import TipoMaterial
 
         stmt = select(AnuncioVenda).where(AnuncioVenda.status == AnuncioVendaStatus.PUBLICADO)
         if categoria_id:
-            stmt = stmt.join(Subcategoria, Subcategoria.id == AnuncioVenda.subcategoria_id).where(
-                Subcategoria.categoria_id == categoria_id
+            stmt = (
+                stmt.join(TipoMaterial, TipoMaterial.id == AnuncioVenda.tipo_material_id)
+                .join(Subcategoria, Subcategoria.id == TipoMaterial.subcategoria_id)
+                .where(Subcategoria.categoria_id == categoria_id)
             )
         if subcategoria_id:
-            stmt = stmt.where(AnuncioVenda.subcategoria_id == subcategoria_id)
+            stmt = stmt.join(
+                TipoMaterial, TipoMaterial.id == AnuncioVenda.tipo_material_id
+            ).where(TipoMaterial.subcategoria_id == subcategoria_id)
+        if tipo_material_id:
+            stmt = stmt.where(AnuncioVenda.tipo_material_id == tipo_material_id)
         if preco_min is not None:
             stmt = stmt.where(AnuncioVenda.preco_pretendido >= preco_min)
         if preco_max is not None:
             stmt = stmt.where(AnuncioVenda.preco_pretendido <= preco_max)
+        if volume_minimo_kg is not None:
+            # Comprador buscando vendedores com volume mínimo → exige volume_estimado >= mínimo
+            stmt = stmt.where(AnuncioVenda.volume_estimado.is_not(None)).where(
+                AnuncioVenda.volume_estimado >= volume_minimo_kg
+            )
+        if condicao_limpeza is not None:
+            stmt = stmt.where(AnuncioVenda.condicao_limpeza == condicao_limpeza)
+        if condicao_umidade is not None:
+            stmt = stmt.where(AnuncioVenda.condicao_umidade == condicao_umidade)
+        if condicao_forma is not None:
+            stmt = stmt.where(AnuncioVenda.condicao_forma == condicao_forma)
         if lat is not None and lng is not None and raio_km is not None:
             stmt = stmt.where(st_dwithin_geography(AnuncioVenda.geom_pub, lat, lng, raio_km))
         stmt = stmt.order_by(AnuncioVenda.created_at.desc()).limit(limit).offset(offset)
@@ -80,15 +109,42 @@ class OfertaCompraRepository(BaseRepository[OfertaCompra]):
         self,
         *,
         subcategoria_id: UUID | None = None,
+        tipo_material_id: UUID | None = None,
         lat: float | None = None,
         lng: float | None = None,
         raio_km: int | None = None,
+        # Filtro mútuo: volume disponível do vendedor que está buscando ofertas.
+        # Oferta só aparece se volume_minimo_kg IS NULL (sem restrição) OU
+        # volume_minimo_kg <= volume_disponivel_kg.
+        volume_disponivel_kg: float | None = None,
+        condicao_limpeza: CondicaoLimpeza | None = None,
+        condicao_umidade: CondicaoUmidade | None = None,
+        condicao_forma: CondicaoForma | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[OfertaCompra]:
+        from app.models.tipo_material import TipoMaterial
+
         stmt = select(OfertaCompra).where(OfertaCompra.status == OfertaCompraStatus.PUBLICADA)
         if subcategoria_id:
-            stmt = stmt.where(OfertaCompra.subcategoria_id == subcategoria_id)
+            stmt = stmt.join(
+                TipoMaterial, TipoMaterial.id == OfertaCompra.tipo_material_id
+            ).where(TipoMaterial.subcategoria_id == subcategoria_id)
+        if tipo_material_id:
+            stmt = stmt.where(OfertaCompra.tipo_material_id == tipo_material_id)
+        if volume_disponivel_kg is not None:
+            stmt = stmt.where(
+                or_(
+                    OfertaCompra.volume_minimo_kg.is_(None),
+                    OfertaCompra.volume_minimo_kg <= volume_disponivel_kg,
+                )
+            )
+        if condicao_limpeza is not None:
+            stmt = stmt.where(OfertaCompra.condicao_limpeza == condicao_limpeza)
+        if condicao_umidade is not None:
+            stmt = stmt.where(OfertaCompra.condicao_umidade == condicao_umidade)
+        if condicao_forma is not None:
+            stmt = stmt.where(OfertaCompra.condicao_forma == condicao_forma)
         if lat is not None and lng is not None and raio_km is not None:
             stmt = stmt.where(st_dwithin_geography(OfertaCompra.geom, lat, lng, raio_km))
         stmt = stmt.order_by(OfertaCompra.created_at.desc()).limit(limit).offset(offset)

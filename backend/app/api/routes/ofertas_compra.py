@@ -12,6 +12,7 @@ from app.core.deps import get_conta_ativa, require_papel_interno
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.db.session import get_db
 from app.models.conta import Conta
+from app.models.enums import CondicaoForma, CondicaoLimpeza, CondicaoUmidade
 from app.models.oferta_compra import OfertaCompra
 from app.repositories.marketplace import OfertaCompraRepository
 from app.schemas.marketplace import (
@@ -42,7 +43,7 @@ async def criar(
     oferta = await svc.criar_oferta_compra(
         conta_id=conta.id,
         papel_id=payload.papel_id,
-        subcategoria_id=payload.subcategoria_id,
+        tipo_material_id=payload.tipo_material_id,
         titulo=payload.titulo,
         descricao=payload.descricao,
         especificacao=payload.especificacao,
@@ -50,6 +51,10 @@ async def criar(
         unidade=payload.unidade,
         volume_min=payload.volume_min,
         volume_max=payload.volume_max,
+        volume_minimo_kg=payload.volume_minimo_kg,
+        condicao_limpeza=payload.condicao_limpeza,
+        condicao_umidade=payload.condicao_umidade,
+        condicao_forma=payload.condicao_forma,
         lat=payload.localizacao.lat,
         lng=payload.localizacao.lng,
         raio_km=payload.raio_km,
@@ -65,17 +70,33 @@ async def criar(
 async def buscar(
     db: Annotated[AsyncSession, Depends(get_db)],
     subcategoria_id: UUID | None = Query(default=None),
+    tipo_material_id: UUID | None = Query(default=None),
     lat: float | None = Query(default=None, ge=-90, le=90),
     lng: float | None = Query(default=None, ge=-180, le=180),
-    raio_km: int | None = Query(default=None, ge=1, le=500),
+    raio_km: int | None = Query(default=None, ge=1, le=500, description="Entre 1 e 500 km"),
+    # Filtro mútuo de volume: vendedor passa seu volume disponível; ofertas com
+    # volume_minimo_kg > volume_disponivel_kg ficam ocultas.
+    volume_disponivel_kg: float | None = Query(
+        default=None,
+        ge=0,
+        description="Volume disponível do buscador em kg. Filtra ofertas com volume_minimo_kg > este valor.",
+    ),
+    condicao_limpeza: CondicaoLimpeza | None = Query(default=None),
+    condicao_umidade: CondicaoUmidade | None = Query(default=None),
+    condicao_forma: CondicaoForma | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ):
     return await OfertaCompraRepository(db).buscar(
         subcategoria_id=subcategoria_id,
+        tipo_material_id=tipo_material_id,
         lat=lat,
         lng=lng,
         raio_km=raio_km,
+        volume_disponivel_kg=volume_disponivel_kg,
+        condicao_limpeza=condicao_limpeza,
+        condicao_umidade=condicao_umidade,
+        condicao_forma=condicao_forma,
         limit=page_size,
         offset=(page - 1) * page_size,
     )

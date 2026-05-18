@@ -1,4 +1,10 @@
-"""Rotas — Categorias (público)."""
+"""Rotas — Categorias e Subcategorias (público).
+
+Endpoints encadeados para os 3 dropdowns do formulário de anúncio:
+    /api/categorias/                          → lista categorias ativas
+    /api/categorias/{id}/subcategorias        → lista subcategorias da categoria
+    /api/subcategorias/{id}/tipos             → lista TiposMaterial da subcategoria
+"""
 
 from __future__ import annotations
 
@@ -6,19 +12,19 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import NotFoundError
 from app.db.session import get_db
-from app.models.atributo_especifico import AtributoComum
 from app.models.categoria import Categoria
 from app.models.subcategoria import Subcategoria
+from app.models.tipo_material import TipoMaterial
 from app.repositories.catalogo import (
-    AtributoComumRepository,
     CategoriaRepository,
     SubcategoriaRepository,
+    TipoMaterialRepository,
 )
-from app.schemas.catalogo import AtributoComumRead, CategoriaRead, SubcategoriaRead
+from app.schemas.catalogo import CategoriaRead, SubcategoriaRead, TipoMaterialRead
 
 router = APIRouter(prefix="/api/categorias", tags=["catalogo"])
 
@@ -41,21 +47,9 @@ async def listar_subcategorias(
 sub_router = APIRouter(prefix="/api/subcategorias", tags=["catalogo"])
 
 
-@sub_router.get("/{subcategoria_id}/atributos", response_model=dict)
-async def listar_atributos(
+@sub_router.get("/{subcategoria_id}/tipos", response_model=list[TipoMaterialRead])
+async def listar_tipos_da_subcategoria(
     subcategoria_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> dict:
-    sub = await SubcategoriaRepository(db).get(subcategoria_id)
-    if sub is None:
-        raise NotFoundError("Subcategoria não encontrada")
-    comuns = await AtributoComumRepository(db).listar_ativos()
-    return {
-        "comuns": [AtributoComumRead.model_validate(c).model_dump() for c in comuns],
-        "especificos": sub.atributos_especificos,
-        "requer_validacao_documental": sub.requer_validacao_documental,
-        "documentos_exigidos": sub.documentos_exigidos,
-    }
-
-
-_ = AtributoComum  # keep import alive
+) -> list[TipoMaterial]:
+    return await TipoMaterialRepository(db).listar_da_subcategoria(subcategoria_id)

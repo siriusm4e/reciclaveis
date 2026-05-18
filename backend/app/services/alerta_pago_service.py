@@ -152,7 +152,7 @@ class AlertaPagoService:
             )
             .where(
                 AnuncioVenda.status == AnuncioVendaStatus.PUBLICADO,
-                AnuncioVenda.subcategoria_id == oferta.subcategoria_id,
+                AnuncioVenda.tipo_material_id == oferta.tipo_material_id,
                 PreferenciaComunicacao.aceita_alerta_pago_de_terceiros.is_(True),
                 st_dwithin_geography(AnuncioVenda.geom_pub, oferta.lat, oferta.lng, raio_km),
             )

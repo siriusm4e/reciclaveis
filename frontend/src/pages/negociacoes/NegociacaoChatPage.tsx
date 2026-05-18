@@ -57,13 +57,23 @@ export default function NegociacaoChatPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [mensagens?.length]);
 
+  // IMPORTANTE: useLocalizacaoExata precisa ser chamado em TODO render (regras de hooks).
+  // Cálculos derivados de `neg` ficam seguros com optional chaining; o hook só ativa
+  // a query quando podeVerExato=true.
+  const aceiteBilateral = Boolean(
+    neg?.aceite_localizacao_exata_vendedor && neg?.aceite_localizacao_exata_comprador,
+  );
+  const podeVerExato = Boolean(
+    aceiteBilateral
+      && (neg?.status === 'combinada' || neg?.status === 'concluida')
+      && neg?.publicacao_tipo === 'anuncio_venda',
+  );
+  const localExata = useLocalizacaoExata(id, podeVerExato);
+
   if (isLoading) return <MobileFrame><CenterSpinner /></MobileFrame>;
   if (error || !neg) return <MobileFrame><ErrorState onRetry={refetch} /></MobileFrame>;
 
   const ehVendedor = conta?.id === neg.conta_vendedora_id;
-  const aceiteBilateral = neg.aceite_localizacao_exata_vendedor && neg.aceite_localizacao_exata_comprador;
-  const podeVerExato = aceiteBilateral && (neg.status === 'combinada' || neg.status === 'concluida') && neg.publicacao_tipo === 'anuncio_venda';
-  const localExata = useLocalizacaoExata(id, podeVerExato);
 
   const onEnviar = (e: React.FormEvent) => {
     e.preventDefault();
