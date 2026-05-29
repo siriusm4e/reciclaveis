@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.deps import get_current_user
@@ -268,8 +269,18 @@ def _new_email_confirmation_token() -> str:
 
 
 @router.get("/me", response_model=UsuarioPublic)
-async def me(current_user: Annotated[Usuario, Depends(get_current_user)]) -> Usuario:
-    return current_user
+async def me(
+    current_user: Annotated[Usuario, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Usuario:
+    # Carrega o perfil_interno explicitamente — o relacionamento é lazy e
+    # acessá-lo durante a serialização dispararia I/O fora do contexto async.
+    user = await db.scalar(
+        select(Usuario)
+        .where(Usuario.id == current_user.id)
+        .options(selectinload(Usuario.perfil_interno))
+    )
+    return user
 
 
 # Marca request como autenticado — útil para correlacionar logs

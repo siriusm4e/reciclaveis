@@ -53,6 +53,11 @@ class MFAVerifyRequest(BaseModel):
     code: Annotated[str, StringConstraints(pattern=r"^\d{6}$")]
 
 
+class PerfilInternoPublic(ORMModel):
+    tipo: str
+    ativo: bool
+
+
 class UsuarioPublic(ORMModel):
     id: UUID
     email: EmailStr
@@ -63,3 +68,4 @@ class UsuarioPublic(ORMModel):
     email_confirmado: bool
     ativo: bool
     created_at: datetime
+    perfil_interno: PerfilInternoPublic | None = None
