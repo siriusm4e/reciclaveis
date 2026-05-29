@@ -12,7 +12,7 @@ from app.schemas.common import ORMModel
 
 
 Cpf = Annotated[str, StringConstraints(pattern=r"^\d{11}$")]
-Password = Annotated[str, StringConstraints(min_length=10, max_length=128)]
+Password = Annotated[str, StringConstraints(min_length=6, max_length=128)]
 
 
 class RegisterRequest(BaseModel):
@@ -42,6 +42,16 @@ class TokenPair(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class AlterarEmailRequest(BaseModel):
+    senha_atual: str
+    novo_email: EmailStr
+
+
+class AlterarSenhaRequest(BaseModel):
+    senha_atual: str
+    nova_senha: Password
 
 
 class MFASetupResponse(BaseModel):

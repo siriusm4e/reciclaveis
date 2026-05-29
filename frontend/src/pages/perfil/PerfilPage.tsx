@@ -3,6 +3,7 @@ import {
   Building2,
   ChevronRight,
   FileText,
+  KeyRound,
   LogOut,
   Plus,
   Settings,
@@ -78,6 +79,7 @@ export default function PerfilPage() {
         </div>
 
         <nav className="space-y-1.5">
+          <PerfilLink to="/perfil/conta-seguranca" icon={<KeyRound className="h-4 w-4" />} label="Conta e segurança" />
           <PerfilLink to="/perfil/reputacao" icon={<Award className="h-4 w-4" />} label="Reputação" />
           <PerfilLink to="/perfil/membros" icon={<Users className="h-4 w-4" />} label="Membros e convites" />
           <PerfilLink to="/documentos" icon={<FileText className="h-4 w-4" />} label="Documentos" />
