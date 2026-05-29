@@ -54,15 +54,13 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Redireciona usuário sem Conta para onboarding — exceto usuários do
-  // backoffice (perfil interno), que operam sem Conta e vão para /admin.
+  // Redireciona apenas quem NÃO tem Conta: superadmin sem conta vai para o
+  // backoffice (/admin); usuário comum vai para o onboarding. Quem tem conta
+  // (inclusive superadmin, ex.: rodrigo) permanece e vê o mapa.
   useEffect(() => {
-    if (me?.perfil_interno) {
-      navigate('/admin');
-      return;
-    }
-    if (!loadingContas && minhasContas && minhasContas.length === 0) {
-      navigate('/onboarding');
+    if (loadingContas || !minhasContas) return;
+    if (minhasContas.length === 0) {
+      navigate(me?.perfil_interno ? '/admin' : '/onboarding');
     }
   }, [me, loadingContas, minhasContas, navigate]);
 

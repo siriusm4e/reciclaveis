@@ -51,6 +51,7 @@ import ReputacaoPage from '@/pages/perfil/ReputacaoPage';
 import MembrosPage from '@/pages/perfil/MembrosPage';
 import PapelConfigPage from '@/pages/perfil/PapelConfigPage';
 import TrocarContaPage from '@/pages/perfil/TrocarContaPage';
+import ContaSegurancaPage from '@/pages/perfil/ContaSegurancaPage';
 
 import DocumentosPage from '@/pages/documentos/DocumentosPage';
 import UploadDocPage from '@/pages/documentos/UploadDocPage';
@@ -155,6 +156,7 @@ export function App() {
         <Route path="/perfil/membros" element={<RequireAuth><MembrosPage /></RequireAuth>} />
         <Route path="/perfil/papeis/:id" element={<RequireAuth><PapelConfigPage /></RequireAuth>} />
         <Route path="/perfil/trocar-conta" element={<RequireAuth><TrocarContaPage /></RequireAuth>} />
+        <Route path="/perfil/conta-seguranca" element={<RequireAuth><ContaSegurancaPage /></RequireAuth>} />
 
         {/* Documentos */}
         <Route path="/documentos" element={<RequireAuth><DocumentosPage /></RequireAuth>} />

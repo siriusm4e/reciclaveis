@@ -26,11 +26,13 @@ export function useLogin() {
     mutationFn: (payload: LoginPayload) => authApi.login(payload),
     onSuccess: async (tokens) => {
       setTokens(tokens);
-      // Carrega o usuário já com o token novo para decidir o destino pós-login.
-      // Usuário do backoffice (perfil interno) vai para /admin; demais, para /home.
+      // Pré-carrega o usuário com o token novo (evita flash na Home/guards).
+      // O destino é sempre /home; a Home redireciona superadmin SEM conta para
+      // /admin e usuário comum sem conta para /onboarding. Superadmin COM conta
+      // (ex.: rodrigo) vê o mapa normalmente e acessa o backoffice pelo menu.
       const me = await qc.fetchQuery({ queryKey: ['me'], queryFn: authApi.me });
       setUsuario(me);
-      navigate(me.perfil_interno ? '/admin' : '/home');
+      navigate('/home');
     },
     onError: (err: unknown) => {
       const e = err as { response?: { data?: { error?: { details?: { mfa_required?: boolean } } } } };
