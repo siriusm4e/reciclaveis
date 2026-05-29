@@ -136,6 +136,11 @@ export interface UUID {
 }
 export type ID = string;
 
+export interface PerfilInternoPublic {
+  tipo: PerfilInternoTipo;
+  ativo: boolean;
+}
+
 export interface UsuarioPublic {
   id: ID;
   email: string;
@@ -146,6 +151,7 @@ export interface UsuarioPublic {
   email_confirmado: boolean;
   ativo: boolean;
   created_at: string;
+  perfil_interno: PerfilInternoPublic | null;
 }
 
 export interface TokenPair {

@@ -17,6 +17,7 @@ export function useMe() {
 
 export function useLogin() {
   const setTokens = useAuthStore((s) => s.setTokens);
+  const setUsuario = useAuthStore((s) => s.setUsuario);
   const setMfaRequired = useAuthStore((s) => s.setMfaRequired);
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -25,8 +26,11 @@ export function useLogin() {
     mutationFn: (payload: LoginPayload) => authApi.login(payload),
     onSuccess: async (tokens) => {
       setTokens(tokens);
-      await qc.invalidateQueries({ queryKey: ['me'] });
-      navigate('/home');
+      // Carrega o usuário já com o token novo para decidir o destino pós-login.
+      // Usuário do backoffice (perfil interno) vai para /admin; demais, para /home.
+      const me = await qc.fetchQuery({ queryKey: ['me'], queryFn: authApi.me });
+      setUsuario(me);
+      navigate(me.perfil_interno ? '/admin' : '/home');
     },
     onError: (err: unknown) => {
       const e = err as { response?: { data?: { error?: { details?: { mfa_required?: boolean } } } } };

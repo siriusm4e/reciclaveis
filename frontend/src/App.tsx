@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 
-import { RequireAuth } from '@/components/RequireAuth';
+import { RequireAdmin, RequireAuth } from '@/components/RequireAuth';
 import { Toaster } from '@/components/ui/toaster';
 import { useAutoSelecionarConta } from '@/hooks/useContaAtiva';
 import { useNotificacoesRealtime } from '@/hooks/useNotificacoes';
@@ -81,6 +81,7 @@ import AdminCreditos from '@/pages/admin/CreditosAdmin';
 import AdminAssinaturas from '@/pages/admin/AssinaturasAdmin';
 import AdminModeracao from '@/pages/admin/ModeracaoAdmin';
 import AdminConteudo from '@/pages/admin/ConteudoAdmin';
+import AdminCampanhas from '@/pages/admin/CampanhasAdmin';
 import AdminAnalytics from '@/pages/admin/AnalyticsAdmin';
 import AdminPerfis from '@/pages/admin/PerfisAdmin';
 import AdminAuditLog from '@/pages/admin/AuditLogAdmin';
@@ -179,7 +180,7 @@ export function App() {
         <Route path="/configuracoes/preferencias" element={<RequireAuth><PreferenciasPage /></RequireAuth>} />
 
         {/* Admin (Web only) */}
-        <Route path="/admin" element={<RequireAuth><AdminShell /></RequireAuth>}>
+        <Route path="/admin" element={<RequireAdmin><AdminShell /></RequireAdmin>}>
           <Route index element={<AdminDashboard />} />
           <Route path="contas" element={<AdminContas />} />
           <Route path="documentos" element={<AdminDocumentos />} />
@@ -187,6 +188,7 @@ export function App() {
           <Route path="creditos" element={<AdminCreditos />} />
           <Route path="assinaturas" element={<AdminAssinaturas />} />
           <Route path="moderacao" element={<AdminModeracao />} />
+          <Route path="campanhas" element={<AdminCampanhas />} />
           <Route path="conteudo" element={<AdminConteudo />} />
           <Route path="analytics" element={<AdminAnalytics />} />
           <Route path="perfis" element={<AdminPerfis />} />

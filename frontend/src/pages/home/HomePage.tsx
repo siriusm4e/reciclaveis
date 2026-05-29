@@ -54,12 +54,17 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Redireciona usuário sem Conta para onboarding
+  // Redireciona usuário sem Conta para onboarding — exceto usuários do
+  // backoffice (perfil interno), que operam sem Conta e vão para /admin.
   useEffect(() => {
+    if (me?.perfil_interno) {
+      navigate('/admin');
+      return;
+    }
     if (!loadingContas && minhasContas && minhasContas.length === 0) {
       navigate('/onboarding');
     }
-  }, [loadingContas, minhasContas, navigate]);
+  }, [me, loadingContas, minhasContas, navigate]);
 
   // Papéis ativos da conta atual (lista pode estar vazia)
   const papeisAtivos: PapelTipo[] = useMemo(

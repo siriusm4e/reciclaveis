@@ -66,6 +66,10 @@ export const adminApi = {
     decidir: (id: ID, acao: AcaoModeracao, motivo: string) =>
       api.post(`/admin/denuncias/${id}/decidir`, { acao, motivo }).then((r) => r.data),
   },
+  campanhas: {
+    list: (page = 1, page_size = 100) =>
+      api.get('/admin/campanhas/', { params: { page, page_size } }).then((r) => r.data),
+  },
   conteudo: {
     criar: (p: Record<string, unknown>) => api.post('/admin/conteudo/', p).then((r) => r.data),
     atualizar: (id: ID, p: Record<string, unknown>) =>
